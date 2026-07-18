@@ -12,6 +12,9 @@ import { chromium } from "playwright";
 const OUT = process.env.OUT ?? "/tmp";
 const browser = await chromium.launch({ channel: "chrome" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// 循环里大量「元素可能不存在」的探测都靠 .catch 兜底，若用默认 30s 超时，
+// 观战/等待阶段每轮都得干等半分钟，80 轮循环能拖上几小时
+page.setDefaultTimeout(2500);
 
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
@@ -27,7 +30,8 @@ page.on("response", async (r) => {
 
 await page.goto("http://localhost:5173");
 await page.selectOption("select >> nth=4", "6"); // 起胡门槛 ≥6，否则牌局太快
-await page.click("text=开始");
+// 提示文案里也有「开始」两个字，必须限定到按钮上
+await page.click("button:has-text('开始')");
 await page.waitForTimeout(1200);
 
 const clickable = (sel) => page.locator(sel).first();
