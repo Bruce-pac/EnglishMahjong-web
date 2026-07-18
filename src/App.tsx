@@ -71,7 +71,15 @@ function Landing({ onStart }: { onStart: () => void }) {
       <div className="landing-links">
         <button
           className="btn btn-ghost"
-          onClick={() => document.getElementById("rules")?.scrollIntoView({ behavior: "smooth" })}
+          onClick={() => {
+            const el = document.getElementById("rules");
+            if (!el) return;
+            el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            // 规则区可能本来就在屏幕里，光滚动等于没反应——闪一下金边当回执
+            el.classList.remove("rules-flash");
+            void el.offsetWidth; // 重启动画
+            el.classList.add("rules-flash");
+          }}
         >
           ❓ 游戏规则
         </button>
@@ -105,10 +113,6 @@ function Landing({ onStart }: { onStart: () => void }) {
           </li>
         </ol>
       </div>
-
-      <footer className="landing-footer">
-        <p>© 2026 英语麻将 · 词典和规则都在本地，游戏中不依赖外部服务</p>
-      </footer>
 
       {showProfile && <Profile onClose={() => setShowProfile(false)} />}
     </div>

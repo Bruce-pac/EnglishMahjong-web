@@ -595,10 +595,12 @@ header b {
   margin-right: 8px;
 }
 
-.landing-footer {
-  margin-top: 36px;
-  font-size: 12px;
-  color: #9fc3b0;
+@keyframes rules-flash {
+  0% { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+  100% { border-color: rgba(255, 255, 255, 0.1); box-shadow: none; }
+}
+.rules-flash {
+  animation: rules-flash 1.2s ease-out;
 }
 
 /* ---------- 游戏设置页 ---------- */
