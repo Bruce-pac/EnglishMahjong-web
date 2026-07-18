@@ -31,6 +31,8 @@ export function Scoreboard({ result, state, matchFinished, onNext, onRestart }: 
           {matchFinished ? "全场结束" : `第 ${state.gamesPlayed} 局结束`}
           {result.exhausted && <span className="tag">荒牌</span>}
         </h2>
+        {/* 场末奖牌按累计总分发，不是最后一局的得分——说清楚，免得对不上号 */}
+        {matchFinished && <p className="rank-note">名次按 {state.gamesPlayed} 局累计总分排定</p>}
 
         <table className="scores">
           <tbody>

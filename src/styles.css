@@ -826,6 +826,11 @@ header b {
   max-width: 820px;
   width: 100%;
 }
+.rank-note {
+  margin: -4px 0 10px;
+  font-size: 12px;
+  color: #9fc3b0;
+}
 .sheet h2 {
   margin: 0 0 18px;
 }
