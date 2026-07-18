@@ -482,68 +482,251 @@ header b {
   font-size: 16px;
 }
 
-/* ---------- 开局设置 ---------- */
+/* ---------- 首页（门面） ---------- */
 
-.setup {
-  max-width: 560px;
-  margin: 8vh auto;
-  padding: 30px;
-  background: rgba(0, 0, 0, 0.25);
-  border-radius: 14px;
+.landing {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 56px 20px 24px;
   text-align: center;
 }
-/* 开始 / 我的档案 是行内相邻的按钮，不留空隙会贴在一起 */
-.setup .btn {
-  margin: 0 6px;
+.hero-tiles {
+  display: inline-flex;
+  gap: 10px;
+  margin-bottom: 18px;
 }
-.setup h1 {
+/* 三张牌微微扇开，像随手码在桌上 */
+.hero-tiles .tile:nth-child(1) { transform: rotate(-7deg) translateY(3px); }
+.hero-tiles .tile:nth-child(3) { transform: rotate(7deg) translateY(3px); }
+.landing h1 {
   margin: 0;
-  letter-spacing: 6px;
+  font-size: 44px;
+  letter-spacing: 10px;
 }
-.tagline {
-  color: #9fc3b0;
-  margin-top: 6px;
+.landing .tagline {
+  font-size: 15px;
+  margin: 10px 0 0;
 }
-.setup-grid {
+
+.feature-cards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin: 24px 0;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 40px 0 36px;
+}
+.feature-card {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 26px 20px;
+  text-align: center;
+}
+.feature-icon {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+.feature-icon-green { background: linear-gradient(135deg, #2eaf6e, #1d8a52); }
+.feature-icon-blue { background: linear-gradient(135deg, #4a8de0, #2f66b8); }
+.feature-icon-gold { background: linear-gradient(135deg, #ddb05e, #b8863b); }
+.feature-card h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.feature-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #cfe3d8;
+}
+
+/* 首页与设置页共用的大号主按钮 */
+.btn-cta {
+  padding: 15px 64px;
+  font-size: 18px;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.landing-links {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.rules-card {
+  margin: 48px 0 0;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 26px 30px;
   text-align: left;
 }
-.setup-grid label {
+.rules-card h2 {
+  margin: 0 0 16px;
+  font-size: 20px;
+}
+.rules-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: rule;
+}
+.rules-list li {
+  counter-increment: rule;
+  margin: 12px 0;
+  font-size: 13.5px;
+  line-height: 1.9;
+  color: #d8e8df;
+}
+.rules-list li::before {
+  content: "0" counter(rule);
+  color: var(--gold);
+  font-weight: 700;
+  margin-right: 10px;
+}
+.rules-list li b {
+  color: var(--gold);
+  margin-right: 8px;
+}
+
+.landing-footer {
+  margin-top: 36px;
+  font-size: 12px;
+  color: #9fc3b0;
+}
+
+/* ---------- 游戏设置页 ---------- */
+
+.setup-page {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 28px 20px 40px;
+}
+.setup-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.setup-top h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: 4px;
+}
+.setup-card {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 14px;
+  padding: 26px 26px 30px;
+  text-align: center;
+}
+.setup-group {
+  margin-bottom: 22px;
+  text-align: left;
+}
+.setup-group-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 8px;
+}
+.setup-group-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #9fc3b0;
+}
+
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.seg-btn {
+  flex: 1 1 auto;
+  min-width: 64px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #eaf4ee;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.seg-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.seg-on {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #3a2a08;
+  font-weight: 700;
+}
+.seg-on:hover {
+  background: var(--gold);
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 14px 0;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.switch-text {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 3px;
+}
+.switch-label {
+  font-size: 14px;
+  font-weight: 700;
+}
+.switch-hint {
   font-size: 12px;
   color: #9fc3b0;
 }
-.setup-grid select {
-  padding: 7px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
+.switch-row input {
+  display: none;
+}
+.switch-knob {
+  flex: none;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  position: relative;
+  transition: background 0.15s ease;
+}
+.switch-knob::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   background: #fff;
-  font-size: 13px;
+  transition: left 0.15s ease;
 }
-.setup-grid .check {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #eee;
+.switch-row input:checked + .switch-knob {
+  background: var(--gold);
 }
-.note {
-  font-size: 12px;
-  color: #9fc3b0;
-  line-height: 1.7;
-  text-align: left;
-  background: rgba(0, 0, 0, 0.2);
-  padding: 10px 12px;
-  border-radius: 8px;
-  border-left: 3px solid var(--gold);
+.switch-row input:checked + .switch-knob::after {
+  left: 22px;
 }
-.note b {
-  color: var(--gold);
+.setup-card .btn-cta {
+  margin-top: 10px;
 }
 
 /* ---------- 结算 ---------- */

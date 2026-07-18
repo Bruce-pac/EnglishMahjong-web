@@ -28,10 +28,12 @@ page.on("response", async (r) => {
   }
 });
 
-await page.goto("http://localhost:5173");
-await page.selectOption("select >> nth=4", "6"); // 起胡门槛 ≥6，否则牌局太快
-// 提示文案里也有「开始」两个字，必须限定到按钮上
-await page.click("button:has-text('开始')");
+// 5173 被占时 vite 会换端口，BASE 环境变量跟着指过去
+await page.goto(process.env.BASE ?? "http://localhost:5173");
+// 首页只是门面，配置在第二步的设置页里
+await page.click(".landing button:has-text('开始游戏')");
+await page.click(".seg-btn:has-text('≥6')"); // 起胡门槛 ≥6，否则牌局太快
+await page.click(".setup-card button:has-text('开始游戏')");
 await page.waitForTimeout(1200);
 
 const clickable = (sel) => page.locator(sel).first();

@@ -29,100 +29,237 @@ const DEFAULTS: MatchConfig = {
   maxGames: 4,
 };
 
-/** 开局设置。默认值＝发明者的原规则，一个字没改。 */
-function Setup({ onStart }: { onStart: (c: MatchConfig) => void }) {
-  const [c, setC] = useState<MatchConfig>(DEFAULTS);
+/** 首页只做门面：是什么、为什么好玩、一个大大的「开始游戏」。配置全部收进设置页。 */
+function Landing({ onStart }: { onStart: () => void }) {
   const [showProfile, setShowProfile] = useState(false);
+
+  return (
+    <div className="landing">
+      <div className="hero">
+        {/* 用游戏里真实的牌当 logo——元音红、辅音黑，一眼看出这是字母麻将 */}
+        <div className="hero-tiles">
+          <Tile tile="a" />
+          <Tile tile="b" />
+          <Tile tile="c" />
+        </div>
+        <h1>英语麻将</h1>
+        <p className="tagline">三缺一，就差一个背单词的你</p>
+      </div>
+
+      <div className="feature-cards">
+        <div className="feature-card">
+          <div className="feature-icon feature-icon-green">🀄</div>
+          <h3>拼词竞技</h3>
+          <p>13 张字母牌起手，摸牌打牌，把手牌拼成英语单词——多组词、组长词才能赢。</p>
+        </div>
+        <div className="feature-card">
+          <div className="feature-icon feature-icon-blue">🤖</div>
+          <h3>AI 对战</h3>
+          <p>三名 AI 牌友随开随打。词汇量按档位分级——从初中到 GRE，难度你说了算。</p>
+        </div>
+        <div className="feature-card">
+          <div className="feature-icon feature-icon-gold">📖</div>
+          <h3>单词本</h3>
+          <p>拼过的词、漏掉的词自动记下来，带音标、释义和朗读，打完就能复习。</p>
+        </div>
+      </div>
+
+      <button className="btn btn-primary btn-cta" onClick={onStart}>
+        ▶ 开始游戏
+      </button>
+
+      <div className="landing-links">
+        <button
+          className="btn btn-ghost"
+          onClick={() => document.getElementById("rules")?.scrollIntoView({ behavior: "smooth" })}
+        >
+          ❓ 游戏规则
+        </button>
+        <button className="btn btn-ghost" onClick={() => setShowProfile(true)}>
+          📖 单词本
+        </button>
+      </div>
+
+      <div className="rules-card" id="rules">
+        <h2>游戏规则</h2>
+        <ol className="rules-list">
+          <li>
+            <b>基本玩法</b>
+            用 108 张字母牌代替麻将牌。每人 13 张起手，轮流摸牌、打牌，把手里的牌拼成英语单词。
+          </li>
+          <li>
+            <b>亮词与暗词</b>
+            拼成的词可以亮出来——亮词补摸「词长 − 3」张，推进快；也可以扣在手里当暗词，难度大，得分 ×2。
+          </li>
+          <li>
+            <b>吃牌</b>
+            上家打出的牌可以吃，但必须当场和手里的牌拼成 ≥3 字母的词亮出，不能白拿进手。
+          </li>
+          <li>
+            <b>胡牌</b>
+            14 张预算被单词填满、零剩余即胡——亮词无论多长只占 3 格，暗词按实际字母数占格。血战到底：先胡的退出，其余人继续。
+          </li>
+          <li>
+            <b>计分</b>
+            字母越稀有分越高，得分再乘词长——词越长涨得越狠；命中本局词库 +10，先胡有名次奖励。
+          </li>
+        </ol>
+      </div>
+
+      <footer className="landing-footer">
+        <p>© 2026 英语麻将 · 词典和规则都在本地，游戏中不依赖外部服务</p>
+      </footer>
+
+      {showProfile && <Profile onClose={() => setShowProfile(false)} />}
+    </div>
+  );
+}
+
+/** 分段选择：一排大按钮，选中态高亮。移动端也点得准，不用下拉框。 */
+function Seg({
+  options,
+  value,
+  onChange,
+}: {
+  options: [string | number, string][];
+  value: string | number;
+  onChange: (v: string | number) => void;
+}) {
+  return (
+    <div className="seg">
+      {options.map(([v, label]) => (
+        <button
+          key={v}
+          className={v === value ? "seg-btn seg-on" : "seg-btn"}
+          onClick={() => onChange(v)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 开关行：标签 + 说明 + 滑动开关 */
+function Switch({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="switch-row">
+      <span className="switch-text">
+        <span className="switch-label">{label}</span>
+        <span className="switch-hint">{hint}</span>
+      </span>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="switch-knob" />
+    </label>
+  );
+}
+
+/** 游戏设置页。默认值＝发明者的原规则，一个字没改。 */
+function Setup({ onStart, onBack }: { onStart: (c: MatchConfig) => void; onBack: () => void }) {
+  const [c, setC] = useState<MatchConfig>(DEFAULTS);
   const set = (k: keyof MatchConfig, v: unknown) => setC({ ...c, [k]: v });
 
   return (
-    <div className="setup">
-      <h1>英语麻将</h1>
-      <p className="tagline">三缺一，就差一个背单词的你</p>
-
-      <div className="setup-grid">
-        <label>
-          词库
-          <select value={c.tier} onChange={(e) => set("tier", e.target.value)}>
-            {TIERS.map(([v, n]) => (
-              <option key={v} value={v}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          AI 难度
-          <select value={c.difficulty} onChange={(e) => set("difficulty", e.target.value)}>
-            <option value="easy">简单（词汇量低一档）</option>
-            <option value="normal">普通（和你同档）</option>
-            <option value="hard">困难（词汇量高一档）</option>
-          </select>
-        </label>
-
-        <label>
-          局数
-          <select value={c.maxGames} onChange={(e) => set("maxGames", +e.target.value)}>
-            {[1, 2, 4, 8].map((n) => (
-              <option key={n} value={n}>
-                {n} 局{n === 4 && "（每人坐一次庄）"}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          最短词长
-          <select value={c.minWordLen} onChange={(e) => set("minWordLen", +e.target.value)}>
-            <option value={2}>2（默认）</option>
-            <option value={3}>3（禁掉 at 等双字母词）</option>
-            <option value={4}>4</option>
-          </select>
-        </label>
-
-        <label>
-          起胡门槛
-          <select value={c.minWinWordLen} onChange={(e) => set("minWinWordLen", +e.target.value)}>
-            <option value={0}>关（默认）</option>
-            <option value={5}>至少一个 5 字母词</option>
-            <option value={6}>至少一个 6 字母词</option>
-            <option value={7}>至少一个 7 字母词</option>
-          </select>
-        </label>
-
-        <label>
-          血战到底
-          <select value={c.bloody ? "on" : "off"} onChange={(e) => set("bloody", e.target.value === "on")}>
-            <option value="on">开（默认，先胡的退出，其余人继续）</option>
-            <option value="off">关（第一人胡牌，本局立即结束）</option>
-          </select>
-        </label>
-
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={c.hints}
-            onChange={(e) => set("hints", e.target.checked)}
-          />
-          开启提示
-        </label>
+    <div className="setup-page">
+      <div className="setup-top">
+        <button className="btn btn-ghost" onClick={onBack}>
+          ← 返回首页
+        </button>
+        <h1>游戏设置</h1>
       </div>
 
-      <p className="note">
-        第一次玩？直接点开始就好。玩熟了觉得不过瘾，
-        把<b>起胡门槛</b>调高 —— 牌局更长、更烧脑。
-      </p>
+      <div className="setup-card">
+        <div className="setup-group">
+          <div className="setup-group-label">词库</div>
+          <Seg options={TIERS as [string, string][]} value={c.tier} onChange={(v) => set("tier", v)} />
+          <p className="setup-group-hint">加分和提示都围着这个词库转；AI 的词汇量也跟着它走。</p>
+        </div>
 
-      <button className="btn btn-primary btn-big" onClick={() => onStart(c)}>
-        开始
-      </button>
+        <div className="setup-group">
+          <div className="setup-group-label">AI 难度</div>
+          <Seg
+            options={[
+              ["easy", "简单"],
+              ["normal", "普通"],
+              ["hard", "困难"],
+            ]}
+            value={c.difficulty}
+            onChange={(v) => set("difficulty", v)}
+          />
+          <p className="setup-group-hint">简单＝AI 词汇量低一档；困难＝高一档。</p>
+        </div>
 
-      <button className="btn btn-ghost" onClick={() => setShowProfile(true)}>
-        📖 单词本
-      </button>
+        <div className="setup-group">
+          <div className="setup-group-label">局数</div>
+          <Seg
+            options={[
+              [1, "1 局"],
+              [2, "2 局"],
+              [4, "4 局"],
+              [8, "8 局"],
+            ]}
+            value={c.maxGames}
+            onChange={(v) => set("maxGames", +v)}
+          />
+          <p className="setup-group-hint">4 局＝每人坐一次庄。</p>
+        </div>
 
-      {showProfile && <Profile onClose={() => setShowProfile(false)} />}
+        <div className="setup-group">
+          <div className="setup-group-label">最短词长</div>
+          <Seg
+            options={[
+              [2, "2（默认）"],
+              [3, "3"],
+              [4, "4"],
+            ]}
+            value={c.minWordLen}
+            onChange={(v) => set("minWordLen", +v)}
+          />
+          <p className="setup-group-hint">调到 3 会禁掉 at、is 这类双字母词。</p>
+        </div>
+
+        <div className="setup-group">
+          <div className="setup-group-label">起胡门槛</div>
+          <Seg
+            options={[
+              [0, "关（默认）"],
+              [5, "≥5 字母"],
+              [6, "≥6 字母"],
+              [7, "≥7 字母"],
+            ]}
+            value={c.minWinWordLen}
+            onChange={(v) => set("minWinWordLen", +v)}
+          />
+          <p className="setup-group-hint">胡牌时手上至少要有一个这么长的词。玩熟了往上调——牌局更长、更烧脑。</p>
+        </div>
+
+        <Switch
+          label="血战到底"
+          hint="开：先胡的退出，其余人继续；关：第一人胡牌本局即结束"
+          checked={c.bloody}
+          onChange={(v) => set("bloody", v)}
+        />
+        <Switch
+          label="提示"
+          hint="拿不准时给候选词。用了不扣分，但那个词会在单词本里标「被提示」"
+          checked={c.hints}
+          onChange={(v) => set("hints", v)}
+        />
+
+        <button className="btn btn-primary btn-cta" onClick={() => onStart(c)}>
+          ▶ 开始游戏
+        </button>
+      </div>
     </div>
   );
 }
@@ -130,6 +267,7 @@ function Setup({ onStart }: { onStart: (c: MatchConfig) => void }) {
 export default function App() {
   const g = useGame();
   const [config, setConfig] = useState<MatchConfig | null>(null);
+  const [view, setView] = useState<"landing" | "setup">("landing");
 
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
@@ -144,8 +282,12 @@ export default function App() {
   }, []);
 
   if (!config || !g.env) {
+    if (view === "landing") {
+      return <Landing onStart={() => setView("setup")} />;
+    }
     return (
       <Setup
+        onBack={() => setView("landing")}
         onStart={(c) => {
           setConfig(c);
           g.newMatch(c);
