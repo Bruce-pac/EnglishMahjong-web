@@ -595,12 +595,87 @@ header b {
   margin-right: 8px;
 }
 
-@keyframes rules-flash {
-  0% { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
-  100% { border-color: rgba(255, 255, 255, 0.1); box-shadow: none; }
+
+/* ---------- 详细规则页 ---------- */
+
+.rules-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 20px 40px;
 }
-.rules-flash {
-  animation: rules-flash 1.2s ease-out;
+.rule-section {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 24px 28px;
+  margin-bottom: 18px;
+  text-align: left;
+}
+.rule-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.rule-head .feature-icon {
+  margin: 0;
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+}
+.rule-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.rule-sub {
+  margin: 14px 0;
+}
+.rule-sub h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  color: var(--gold);
+}
+.rule-sub p,
+.rule-sub ol {
+  margin: 6px 0;
+  font-size: 13.5px;
+  line-height: 1.9;
+  color: #d8e8df;
+}
+.rule-sub ol {
+  padding-left: 22px;
+}
+.rule-sub b,
+.rule-card b {
+  color: #fff;
+}
+.rule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.rule-card {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.rule-card h3 {
+  margin: 0 0 6px;
+  font-size: 14.5px;
+  color: #8fd3ff;
+}
+.rule-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #d8e8df;
+}
+.feature-icon-orange { background: linear-gradient(135deg, #e0894a, #b85e2f); }
+.feature-icon-gray { background: linear-gradient(135deg, #8a9a94, #5f6e68); }
+.rules-page-bottom {
+  text-align: center;
+  margin-top: 24px;
 }
 
 /* ---------- 游戏设置页 ---------- */

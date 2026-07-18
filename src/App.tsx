@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { MatchConfig } from "./api";
 import { Hand } from "./components/Hand";
 import { Profile } from "./components/Profile";
+import { RulesPage } from "./components/RulesPage";
 import { Scoreboard } from "./components/Scoreboard";
 import { Spectating } from "./components/Spectating";
 import { Table } from "./components/Table";
@@ -30,7 +31,7 @@ const DEFAULTS: MatchConfig = {
 };
 
 /** 首页只做门面：是什么、为什么好玩、一个大大的「开始游戏」。配置全部收进设置页。 */
-function Landing({ onStart }: { onStart: () => void }) {
+function Landing({ onStart, onRules }: { onStart: () => void; onRules: () => void }) {
   const [showProfile, setShowProfile] = useState(false);
 
   return (
@@ -69,18 +70,7 @@ function Landing({ onStart }: { onStart: () => void }) {
       </button>
 
       <div className="landing-links">
-        <button
-          className="btn btn-ghost"
-          onClick={() => {
-            const el = document.getElementById("rules");
-            if (!el) return;
-            el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-            // 规则区可能本来就在屏幕里，光滚动等于没反应——闪一下金边当回执
-            el.classList.remove("rules-flash");
-            void el.offsetWidth; // 重启动画
-            el.classList.add("rules-flash");
-          }}
-        >
+        <button className="btn btn-ghost" onClick={onRules}>
           ❓ 游戏规则
         </button>
         <button className="btn btn-ghost" onClick={() => setShowProfile(true)}>
@@ -271,7 +261,7 @@ function Setup({ onStart, onBack }: { onStart: (c: MatchConfig) => void; onBack:
 export default function App() {
   const g = useGame();
   const [config, setConfig] = useState<MatchConfig | null>(null);
-  const [view, setView] = useState<"landing" | "setup">("landing");
+  const [view, setView] = useState<"landing" | "setup" | "rules">("landing");
 
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
@@ -287,7 +277,10 @@ export default function App() {
 
   if (!config || !g.env) {
     if (view === "landing") {
-      return <Landing onStart={() => setView("setup")} />;
+      return <Landing onStart={() => setView("setup")} onRules={() => setView("rules")} />;
+    }
+    if (view === "rules") {
+      return <RulesPage onBack={() => setView("landing")} />;
     }
     return (
       <Setup
