@@ -275,6 +275,26 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 开局成功就把 matchId 写进地址栏——上面的恢复逻辑全靠它，否则刷新即弃局
+  const matchId = g.env?.matchId;
+  useEffect(() => {
+    if (!matchId) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("match") !== matchId) {
+      url.searchParams.set("match", matchId);
+      history.replaceState(null, "", url);
+    }
+  }, [matchId]);
+
+  // 恢复失败（牌局已被回收 / 服务器重启过）：清掉失效参数回首页，
+  // 不然每次刷新都对着一个不存在的牌局空转
+  useEffect(() => {
+    if (config && !g.busy && !g.env) {
+      history.replaceState(null, "", window.location.pathname);
+      setConfig(null);
+    }
+  }, [config, g.busy, g.env]);
+
   if (!config || !g.env) {
     if (view === "landing") {
       return <Landing onStart={() => setView("setup")} onRules={() => setView("rules")} />;
@@ -461,6 +481,7 @@ export default function App() {
           matchFinished={matchFinished}
           onNext={g.nextGame}
           onRestart={() => {
+            history.replaceState(null, "", window.location.pathname);
             setConfig(null);
           }}
         />
