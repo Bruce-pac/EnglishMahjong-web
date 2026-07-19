@@ -227,8 +227,8 @@ export const api = {
   ) => post<Envelope>(`/api/matches/${id}/action`, body),
 
   /** 把散牌区选中的牌组成一个暗词 */
-  group: (id: string, tiles: string, word?: string, expansion?: string) =>
-    post<Envelope>(`/api/matches/${id}/group`, { tiles, word, expansion }),
+  group: (id: string, tiles: string, word?: string, viaHint?: boolean, expansion?: string) =>
+    post<Envelope>(`/api/matches/${id}/group`, { tiles, word, viaHint, expansion }),
 
   /** 拆开一个已组的暗词，牌退回散牌区 */
   ungroup: (id: string, tiles: string) =>

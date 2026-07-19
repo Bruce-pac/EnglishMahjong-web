@@ -283,8 +283,8 @@ export function useGame() {
     pass: () => run(() => api.act(matchId!, { kind: "pass" })),
 
     /** 把散牌区选中的牌组成暗词 —— 这是玩家自己的活，服务器只校验 */
-    group: (tiles: string, word?: string, expansion?: string) =>
-      run(() => api.group(matchId!, tiles, word, expansion)),
+    group: (tiles: string, word?: string, viaHint?: boolean, expansion?: string) =>
+      run(() => api.group(matchId!, tiles, word, viaHint, expansion)),
     ungroup: (tiles: string) => run(() => api.ungroup(matchId!, tiles)),
 
     validate: (tiles: string, word: string, withTile?: string): Promise<Validation> =>

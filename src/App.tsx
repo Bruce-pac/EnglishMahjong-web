@@ -262,6 +262,8 @@ export default function App() {
   const g = useGame();
   const [config, setConfig] = useState<MatchConfig | null>(null);
   const [view, setView] = useState<"landing" | "setup" | "rules">("landing");
+  /** 提示面板点的词：交给 Hand 铺好选牌，亮不亮玩家自己定 */
+  const [hintPick, setHintPick] = useState<{ word: string; nonce: number } | null>(null);
 
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
@@ -416,17 +418,13 @@ export default function App() {
               key={h.tiles + h.word}
               className="btn btn-hint"
               disabled={g.busy}
-              onClick={() =>
-                pending.kind === "chi"
-                  ? g.chi(h.tiles, h.word, true)
-                  : g.reveal(h.tiles, h.word, true)
-              }
+              onClick={() => setHintPick({ word: h.word, nonce: Date.now() })}
             >
               {h.word.toUpperCase()}
               {h.wild && <span className="wild-note">★={h.wild.toUpperCase()}</span>}
             </button>
           ))}
-          <span className="hints-note">用提示不扣分，但这个词会被标记「被提示」</span>
+          <span className="hints-note">点一下替你选好牌，亮出还是收作暗词由你决定；用提示的词会被标记「被提示」</span>
         </div>
       )}
 
@@ -445,6 +443,7 @@ export default function App() {
         onDiscard={g.discard}
         onReveal={g.reveal}
         onChi={g.chi}
+        hintPick={hintPick}
         onWin={g.win}
         validate={g.validate}
         canDiscard={pending?.kind === "discard" || pending?.kind === "reveal"}

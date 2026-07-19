@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Validation, Word } from "../api";
-import { Tile, isWild, wildCandidates } from "./Tile";
+import { CONSONANT_WILD, Tile, VOWEL_WILD, isWild, wildCandidates } from "./Tile";
 import { WordTiles } from "./WordTiles";
 
 interface Props {
@@ -24,7 +24,7 @@ interface Props {
   drawn?: string[];
   /** 吃牌 / 胡牌时，要一起参与拼词的那张牌（上家打出的、或刚摸到的） */
   extraTile?: string;
-  onGroup: (tiles: string, word: string, expansion?: string) => void;
+  onGroup: (tiles: string, word: string, viaHint?: boolean, expansion?: string) => void;
   onUngroup: (tiles: string) => void;
   onDiscard?: (tile: string) => void;
   onReveal?: (tiles: string, word: string, viaHint?: boolean, expansion?: string) => void;
@@ -32,6 +32,8 @@ interface Props {
   /** 胡牌：必须自己拼出最后那个词 */
   onWin?: (word: string, expansion?: string) => void;
   validate: (tiles: string, word: string, withTile?: string) => Promise<Validation>;
+  /** 提示面板点了某个词：把它的牌替玩家选好，亮不亮由玩家决定 */
+  hintPick?: { word: string; nonce: number } | null;
   canDiscard: boolean;
   canReveal: boolean;
   canWin: boolean;
@@ -50,6 +52,7 @@ export function Hand({
   onChi,
   onWin,
   validate,
+  hintPick,
   canDiscard,
   canReveal,
   canWin,
@@ -64,6 +67,43 @@ export function Hand({
   const [check, setCheck] = useState<Validation | null>(null);
   /** 缩写的全称（RULES.md §8.3：拼对才算） */
   const [expansion, setExpansion] = useState("");
+  /** 当前选择来自哪个提示词——提交时它决定要不要打「被提示」印记 */
+  const [hintWord, setHintWord] = useState<string | null>(null);
+
+  /**
+   * 点提示 = 替玩家把牌选好，**不替他做决定**。亮出、收作暗词还是重选，
+   * 走的都是正常点选流程的按钮。曾经是点了直接亮词——提示不该抢走选择权。
+   */
+  useEffect(() => {
+    if (!hintPick) return;
+    const letters = [...hintPick.word];
+    // 吃牌时词里有一个字母由外来的那张牌出：挑第一个匹配位给它
+    const extraAt = extraTile !== undefined ? letters.indexOf(extraTile) : -1;
+
+    const used = new Set<number>();
+    const idxs: number[] = [];
+    const newWilds: Record<number, string> = {};
+    for (let i = 0; i < letters.length; i++) {
+      if (i === extraAt) continue;
+      const ch = letters[i];
+      let j = loose.findIndex((t, k) => !used.has(k) && t === ch);
+      if (j < 0) {
+        // 手里没这个字母，用对应类别的白搭代
+        const sym = "aeiou".includes(ch) ? VOWEL_WILD : CONSONANT_WILD;
+        j = loose.findIndex((t, k) => !used.has(k) && t === sym);
+        if (j >= 0) newWilds[j] = ch;
+      }
+      if (j < 0) return; // 拼不齐（理论上不会：提示就是从这手牌算的）
+      used.add(j);
+      idxs.push(j);
+    }
+    setPicked(idxs);
+    setWilds(newWilds);
+    setExtraPos(extraAt >= 0 ? extraAt : 0);
+    setExpansion("");
+    setHintWord(hintPick.word);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hintPick?.nonce]);
 
   /**
    * 进入胡牌状态时散牌有几张。用它来区分「刚进来」和「玩家重整了手牌」——
@@ -175,6 +215,7 @@ export function Hand({
       return p.filter((x) => x !== i);
     });
     setExpansion("");
+    setHintWord(null);
   };
 
   /**
@@ -189,6 +230,7 @@ export function Hand({
     setWilds({});
     setExpansion("");
     setExtraPos(0);
+    setHintWord(null);
     setPicked(canWin ? loose.map((_, i) => i) : []);
   };
 
@@ -209,13 +251,13 @@ export function Hand({
     fn?: (tiles: string, word: string, viaHint?: boolean, e?: string) => void,
   ) => {
     if (!check?.valid || !fn) return;
-    fn(selectedTiles + (useExtra ? extraTile : ""), check.word!, false, exp());
+    fn(selectedTiles + (useExtra ? extraTile : ""), check.word!, check.word === hintWord, exp());
     clear();
   };
 
   const submitGroup = () => {
     if (!check?.valid) return;
-    onGroup(selectedTiles, check.word!, exp());
+    onGroup(selectedTiles, check.word!, check.word === hintWord, exp());
     clear();
   };
 
