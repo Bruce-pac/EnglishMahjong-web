@@ -213,6 +213,14 @@ header b {
   align-items: flex-start;
   width: 100%;
   justify-content: center;
+  /* 空间不够时让对手卡换行，绝不把牌河挤扁 */
+  flex-wrap: wrap;
+}
+/* 两侧对手亮词多时会横向撑开——限宽让词条在卡内换行，
+   否则牌河（唯一的弹性项）会被挤成一张牌宽的竖条 */
+.table-mid .opponent {
+  flex: 0 1 auto;
+  max-width: 300px;
 }
 
 .opponent {
@@ -257,7 +265,9 @@ header b {
 }
 
 .river {
-  flex: 1;
+  flex: 1 1 300px;
+  /* 下限 ≈ 每行 7 张小牌：宁可换行也不塌缩 */
+  min-width: 300px;
   max-width: 460px;
   min-height: 130px;
   background: var(--felt-dark);
