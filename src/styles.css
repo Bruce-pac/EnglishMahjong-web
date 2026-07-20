@@ -605,6 +605,26 @@ header b {
   margin-right: 8px;
 }
 
+.landing-footer {
+  margin-top: 36px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.footer-link {
+  color: #9fc3b0;
+  text-decoration: none;
+}
+.footer-link:hover {
+  color: var(--gold);
+  text-decoration: underline;
+}
+.footer-dot {
+  color: #5c7c6c;
+}
+
 
 /* ---------- 详细规则页 ---------- */
 

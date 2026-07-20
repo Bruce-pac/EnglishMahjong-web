@@ -6,6 +6,7 @@
  */
 
 import type { Other, Tile as TileType } from "../api";
+import { AI_NAMES } from "../aiNames";
 import { Tile, TileBack } from "./Tile";
 import { WordTiles } from "./WordTiles";
 
@@ -15,7 +16,7 @@ function Opponent({ p, active }: { p: Other; active: boolean }) {
   return (
     <div className={`opponent ${active ? "opponent-active" : ""} ${p.won ? "opponent-won" : ""}`}>
       <div className="opponent-name">
-        {SEAT_NAMES[p.seat]} · AI-{p.seat}
+        {SEAT_NAMES[p.seat]} · {AI_NAMES[p.seat]}
         {p.won && <span className="trophy">🏆 第{(p.winOrder ?? 0) + 1}胡</span>}
       </div>
 

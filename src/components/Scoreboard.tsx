@@ -7,6 +7,7 @@
  */
 
 import { useState } from "react";
+import { AI_NAMES } from "../aiNames";
 import type { Result, State } from "../api";
 import { Profile } from "./Profile";
 import { Tile } from "./Tile";
@@ -39,7 +40,7 @@ export function Scoreboard({ result, state, matchFinished, onNext, onRestart }: 
             {result.rows.map((r, i) => (
               <tr key={r.seat} className={r.seat === 0 ? "me-row" : ""}>
                 <td className="medal">{MEDALS[i]}</td>
-                <td className="who">{r.seat === 0 ? "你" : `AI-${r.seat}`}</td>
+                <td className="who">{r.seat === 0 ? "你" : AI_NAMES[r.seat]}</td>
                 <td className="pts">{r.score}</td>
                 <td className="words">
                   {r.words.length ? (

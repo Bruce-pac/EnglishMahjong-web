@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AI_NAMES } from "../aiNames";
 import { api, type Envelope, type GameEvent, type MatchConfig, type Validation } from "../api";
 
 /** AI 每步之间停一下，不然它们瞬间打完，学生看不清发生了什么 */
@@ -22,7 +23,7 @@ export interface LogEntry {
 const SEAT_NAMES: Record<number, string> = { 1: "下家", 2: "对家", 3: "上家" };
 
 function describe(e: GameEvent): string | null {
-  const who = e.seat === 0 ? "你" : `${SEAT_NAMES[e.seat ?? 0] ?? ""} AI-${e.seat}`;
+  const who = e.seat === 0 ? "你" : `${SEAT_NAMES[e.seat ?? 0] ?? ""} ${AI_NAMES[e.seat ?? 0] ?? ""}`;
   switch (e.t) {
     case "draw":
       return e.seat === 0 ? null : `${who} 摸牌`;

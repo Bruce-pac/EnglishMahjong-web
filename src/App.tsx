@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AI_NAMES } from "./aiNames";
 import type { MatchConfig } from "./api";
 import { Hand } from "./components/Hand";
 import { Profile } from "./components/Profile";
@@ -102,6 +103,26 @@ function Landing({ onStart, onRules }: { onStart: () => void; onRules: () => voi
             字母越稀有分越高，得分再乘词长——词越长涨得越狠；命中本局词库 +10，先胡有名次奖励。
           </li>
         </ol>
+      </div>
+
+      <div className="landing-footer">
+        <a
+          className="footer-link"
+          href="https://github.com/Bruce-pac/EnglishMahjong-web"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          ⭐ 在 GitHub 上看源码
+        </a>
+        <span className="footer-dot">·</span>
+        <a
+          className="footer-link"
+          href="https://github.com/Bruce-pac/EnglishMahjong-web/issues/new"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          💬 提供反馈
+        </a>
       </div>
 
       {showProfile && <Profile onClose={() => setShowProfile(false)} />}
@@ -459,7 +480,7 @@ export default function App() {
           <div className="celebrate-card">
             <div className="celebrate-icon">🏆</div>
             <div className="celebrate-who">
-              {g.celebrate.seat === 0 ? "你" : `AI-${g.celebrate.seat}`}
+              {g.celebrate.seat === 0 ? "你" : AI_NAMES[g.celebrate.seat ?? 0]}
               {g.celebrate.selfDrawn ? " 自摸！" : " 胡牌！"}
             </div>
             <div className="celebrate-order">第 {(g.celebrate.order ?? 0) + 1} 个胡</div>
