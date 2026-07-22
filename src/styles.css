@@ -190,6 +190,34 @@ header b {
   border-radius: 10px;
   font-weight: 700;
 }
+/* 文案沿用顶栏其他项的「灰标签 + 金色值」格式（词库 初中、难度 普通），
+   扫一眼就知道它管什么；加个边框把「这是可点的」和纯展示项区分开 */
+.case-toggle {
+  margin-left: 4px;
+  padding: 2px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.case-toggle:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+/* 手牌区小写模式。字母是渲染时 toUpperCase 上去的（数据层一直是小写），
+   这里用 text-transform 覆盖回来——比给每个组件透传一个 prop 干净得多，
+   而且天然只作用于 .hand 内部，牌河和对手区不受影响。 */
+.hand-lower .hand .tile-letter,
+.hand-lower .hand .tile-wild,
+.hand-lower .hand .word-label,
+.hand-lower .hand .checker-word,
+.hand-lower .hand .wild-letter {
+  text-transform: lowercase;
+}
 
 /* ---------- 牌桌 ---------- */
 

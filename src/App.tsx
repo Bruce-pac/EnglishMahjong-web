@@ -285,6 +285,20 @@ export default function App() {
   const [view, setView] = useState<"landing" | "setup" | "rules">("landing");
   /** 提示面板点的词：交给 Hand 铺好选牌，亮不亮玩家自己定 */
   const [hintPick, setHintPick] = useState<{ word: string; nonce: number } | null>(null);
+  /**
+   * 手牌区的字母大小写。**纯显示**——牌面数据、发给服务端的一切都不受影响。
+   * 全大写的字母排在一起有时反而认不出单词（这正是玩家拼不出来的原因之一），
+   * 所以让他随手切，并记进 localStorage：下一局、刷新后都照他的习惯来。
+   */
+  const [lowerHand, setLowerHand] = useState(
+    () => localStorage.getItem("emj-hand-case") === "lower",
+  );
+  const toggleHandCase = () => {
+    setLowerHand((on) => {
+      localStorage.setItem("emj-hand-case", on ? "upper" : "lower");
+      return !on;
+    });
+  };
 
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
@@ -343,7 +357,7 @@ export default function App() {
   const myTurn = pending !== null;
 
   return (
-    <div className="app">
+    <div className={lowerHand ? "app hand-lower" : "app"}>
       <header>
         <span className="brand">英语麻将</span>
         {/* 玩法开关常亮在顶栏——起胡门槛记不住的话，玩家会拿着不够门槛的牌
@@ -373,6 +387,13 @@ export default function App() {
           预算 <b>{me.budgetLeft}</b>/14
         </span>
         {state.config.hints && <span className="tag-hint">提示已开</span>}
+        <button
+          className="case-toggle"
+          onClick={toggleHandCase}
+          title="切换手牌区字母的大小写（只影响显示）"
+        >
+          字母 <b>{lowerHand ? "小写" : "大写"}</b>
+        </button>
       </header>
 
       {/* 操作记录：滚动日志，最近几条一直可见——横幅一闪就没了，一不注意就不知道
