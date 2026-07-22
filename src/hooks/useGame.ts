@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AI_NAMES } from "../aiNames";
 import { api, type Envelope, type GameEvent, type MatchConfig, type Validation } from "../api";
+import { play, type SoundName } from "../sound";
 
 /** AI 每步之间停一下，不然它们瞬间打完，学生看不清发生了什么 */
 const AI_STEP_MS = 700;
@@ -21,6 +22,19 @@ export interface LogEntry {
 }
 
 const SEAT_NAMES: Record<number, string> = { 1: "下家", 2: "对家", 3: "上家" };
+
+/**
+ * 事件 → 音效。只给关键动作配声（ROADMAP.md v0.2）：摸牌四家每轮都摸，全响太吵。
+ *
+ * 这张表只管**别人**的动作——自己的动作在点击那一刻就响了，不能等服务端回包：
+ * 打牌走乐观更新，线上还有几百毫秒延迟，等回包音效会明显慢半拍。
+ */
+const SOUND_FOR: Partial<Record<GameEvent["t"], SoundName>> = {
+  discard: "discard",
+  chi: "chi",
+  reveal: "reveal",
+  win: "win",
+};
 
 function describe(e: GameEvent): string | null {
   const who = e.seat === 0 ? "你" : `${SEAT_NAMES[e.seat ?? 0] ?? ""} ${AI_NAMES[e.seat ?? 0] ?? ""}`;
@@ -103,11 +117,18 @@ export function useGame() {
         timers.current.push(window.setTimeout(() => setCelebrate(null), 2200));
       }
 
+      // 荒牌是全局事件（没有座位），跟在所有动作播完之后收场。
+      // instant 那条路是开新局/新场/刷新恢复，放的是「过去」的事件，不该出声。
+      const endSound = () => {
+        if (!instant && next.events.some((e) => e.t === "exhausted")) play("exhausted");
+      };
+
       if (instant || worth.length === 0) {
         next.events.forEach(pushLog);
         setReplay(null);
         setReplaying(false);
         setEnv(next);
+        endSound();
         return;
       }
 
@@ -120,6 +141,8 @@ export function useGame() {
           window.setTimeout(() => {
             setReplay(e);
             pushLog(e);
+            const s = SOUND_FOR[e.t];
+            if (s) play(s);
           }, i * AI_STEP_MS),
         );
       });
@@ -128,6 +151,7 @@ export function useGame() {
           setReplay(null);
           setReplaying(false);
           setEnv(next);
+          endSound();
         }, worth.length * AI_STEP_MS),
       );
     },
@@ -182,8 +206,9 @@ export function useGame() {
   );
 
   const discard = useCallback(
-    (tile: string) =>
-      optimistic(
+    (tile: string) => {
+      play("discard");
+      return optimistic(
         (cur) => {
           const loose = [...cur.state.me.loose];
           const at = loose.indexOf(tile);
@@ -203,7 +228,8 @@ export function useGame() {
           };
         },
         () => api.act(matchIdRef.current!, { kind: "discard", tile }),
-      ),
+      );
+    },
     [optimistic],
   );
 
@@ -215,8 +241,9 @@ export function useGame() {
    * 暗词拆法 = 你已组好的词 + 最后拼成的那个（与服务端 _human_win_split 一致）。
    */
   const win = useCallback(
-    (word: string, expansion?: string) =>
-      optimistic(
+    (word: string, expansion?: string) => {
+      play("win");
+      return optimistic(
         (cur) => {
           if (!cur.pending?.tile) return cur;
           const me = cur.state.me;
@@ -239,7 +266,8 @@ export function useGame() {
           };
         },
         () => api.act(matchIdRef.current!, { kind: "win", word, expansion }),
-      ),
+      );
+    },
     [optimistic],
   );
 
@@ -266,19 +294,28 @@ export function useGame() {
     // 开新场顺手清掉上一场的操作记录——旧日志挂在角落里会让人以为还在上一场
     newMatch: (config: MatchConfig) => {
       setLog([]);
+      play("deal");
       return run(() => api.newMatch(config), true);
     },
-    nextGame: () => run(() => api.nextGame(matchId!), true),
+    // 每一局都要重新发牌，所以「下一局」也响
+    nextGame: () => {
+      play("deal");
+      return run(() => api.nextGame(matchId!), true);
+    },
     /** 刷新页面后恢复对局。不重播动画，直接给最终状态 */
     resume: (id: string) => run(() => api.resume(id), true),
 
     /** 打出一张牌——本地立即生效，不等 AI 动画（见上面的 discard） */
     discard,
     /** 亮词 / 吃牌 —— viaHint 会在正题集里留下「被提示」的印记 */
-    reveal: (tiles: string, word: string, viaHint = false, expansion?: string) =>
-      run(() => api.act(matchId!, { kind: "reveal", tiles, word, viaHint, expansion })),
-    chi: (tiles: string, word: string, viaHint = false, expansion?: string) =>
-      run(() => api.act(matchId!, { kind: "chi", tiles, word, viaHint, expansion })),
+    reveal: (tiles: string, word: string, viaHint = false, expansion?: string) => {
+      play("reveal");
+      return run(() => api.act(matchId!, { kind: "reveal", tiles, word, viaHint, expansion }));
+    },
+    chi: (tiles: string, word: string, viaHint = false, expansion?: string) => {
+      play("chi");
+      return run(() => api.act(matchId!, { kind: "chi", tiles, word, viaHint, expansion }));
+    },
     /** 胡牌——本地立即生效，服务端拒绝则回滚（见上面的 win） */
     win,
     pass: () => run(() => api.act(matchId!, { kind: "pass" })),

@@ -276,6 +276,24 @@ header b {
   align-items: center;
   flex-wrap: wrap;
 }
+
+/* 发牌：牌背从上方落位。每张牌的 animation-delay 由 Table.tsx 按
+   「第几家 × 第几张」算好，三家依次、家内逐张，跟着发牌音效的节奏走。
+   **backwards 不能少**：带延迟的动画在开始前必须先保持初始状态，
+   否则牌会先原地显示、轮到自己时才猛地跳一下。 */
+@keyframes deal-drop {
+  from {
+    transform: translateY(-26px) rotate(-6deg);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) rotate(0);
+    opacity: 1;
+  }
+}
+.opponent-backs.dealing .tile-back {
+  animation: deal-drop 0.26s cubic-bezier(0.2, 0.85, 0.3, 1) backwards;
+}
 .opponent-words {
   display: flex;
   gap: 6px;

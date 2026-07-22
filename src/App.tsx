@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AI_NAMES } from "./aiNames";
 import type { MatchConfig } from "./api";
+import { isMuted, setMuted } from "./sound";
 import { Hand } from "./components/Hand";
 import { Profile } from "./components/Profile";
 import { RulesPage } from "./components/RulesPage";
@@ -299,6 +300,27 @@ export default function App() {
       return !on;
     });
   };
+  /** 音效开关。默认开，状态由 sound.ts 持有（它还要在播放前自查），这里只做镜像 */
+  const [sound, setSound] = useState(() => !isMuted());
+  /**
+   * 发牌动画：开新局的那一瞬三家依次落牌，和发牌音效同步。
+   * 只在这一小段时间内为真——常驻的话，对手每次摸牌新挂一张牌背都会跟着抖。
+   * 窗口要比动画本身（最后一张约 860ms 落定，见 Table.tsx）留足余量，
+   * 否则类被撤掉时最后几张牌会直接跳到终点。
+   */
+  const [dealing, setDealing] = useState(false);
+  const gameNo = g.env?.state.gamesPlayed;
+  const matchKey = g.env?.matchId;
+  useEffect(() => {
+    if (gameNo === undefined) return;
+    setDealing(true);
+    const t = window.setTimeout(() => setDealing(false), 1100);
+    return () => clearTimeout(t);
+  }, [gameNo, matchKey]);
+  const toggleSound = () => {
+    setMuted(sound);
+    setSound(!sound);
+  };
 
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
@@ -394,6 +416,9 @@ export default function App() {
         >
           字母 <b>{lowerHand ? "小写" : "大写"}</b>
         </button>
+        <button className="case-toggle" onClick={toggleSound} title="打牌、吃牌、胡牌的音效">
+          音效 <b>{sound ? "开" : "关"}</b>
+        </button>
       </header>
 
       {/* 操作记录：滚动日志，最近几条一直可见——横幅一闪就没了，一不注意就不知道
@@ -408,7 +433,13 @@ export default function App() {
         </div>
       )}
 
-      <Table others={state.others} discards={state.discards} turn={state.turn} live={live} />
+      <Table
+        others={state.others}
+        discards={state.discards}
+        turn={state.turn}
+        live={live}
+        dealing={dealing}
+      />
 
       {/* 我亮出的明词 */}
       {me.melds.length > 0 && (
