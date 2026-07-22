@@ -60,7 +60,6 @@ node playthrough.mjs # Playwright 端到端：真实浏览器打完一整局
 
 ## TODO / Roadmap
 
-- [ ] 音效与触感反馈
 - [ ] 单词本导出
 - [ ] 更多词库档位
 - [ ] 真人联机对战（房间制）
