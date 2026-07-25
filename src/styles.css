@@ -207,6 +207,106 @@ header b {
   background: rgba(255, 255, 255, 0.16);
   color: #fff;
 }
+.account-badge {
+  margin-left: 4px;
+  font-size: 13px;
+}
+
+/* ---------- 账号弹窗 ---------- */
+
+.sheet-account {
+  max-width: 380px;
+}
+.account-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.account-tab {
+  flex: 1;
+  padding: 9px;
+  font-size: 15px;
+  color: #9fc3b0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.account-tab.on {
+  color: #3a2a08;
+  background: var(--gold);
+  border-color: var(--gold);
+  font-weight: 700;
+}
+.account-note {
+  font-size: 12.5px;
+  color: #9fc3b0;
+  line-height: 1.7;
+  margin: 0 0 14px;
+}
+.account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: #cfe6da;
+  margin-bottom: 12px;
+}
+.account-hint {
+  color: #7f9c8d;
+  font-size: 11px;
+}
+.account-field input {
+  padding: 9px 11px;
+  font-size: 14px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #1a1a1a;
+}
+.account-error {
+  color: #ffb4a2;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+.account-loggedin {
+  font-size: 16px;
+  margin: 4px 0 8px;
+}
+.account-loggedin b {
+  color: var(--gold);
+}
+.account-close {
+  display: block;
+  margin: 14px auto 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #9fc3b0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.account-close:hover {
+  color: #fff;
+}
+.account-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+.btn-save {
+  display: block;
+  width: 100%;
+  margin: 4px 0 14px;
+  background: rgba(212, 162, 76, 0.16);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 700;
+}
+.btn-save:hover:not(:disabled) {
+  background: rgba(212, 162, 76, 0.28);
+}
 
 /* 手牌区小写模式。字母是渲染时 toUpperCase 上去的（数据层一直是小写），
    这里用 text-transform 覆盖回来——比给每个组件透传一个 prop 干净得多，

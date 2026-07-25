@@ -18,11 +18,22 @@ interface Props {
   result: Result;
   state: State;
   matchFinished: boolean;
+  /** 匿名（未绑定账号）且已查过登录态时为 true——显示「保存成绩」入口 */
+  canSave: boolean;
+  onSave: () => void;
   onNext: () => void;
   onRestart: () => void;
 }
 
-export function Scoreboard({ result, state, matchFinished, onNext, onRestart }: Props) {
+export function Scoreboard({
+  result,
+  state,
+  matchFinished,
+  canSave,
+  onSave,
+  onNext,
+  onRestart,
+}: Props) {
   const [showProfile, setShowProfile] = useState(false);
 
   return (
@@ -98,6 +109,13 @@ export function Scoreboard({ result, state, matchFinished, onNext, onRestart }: 
             </div>
           )}
         </div>
+
+        {/* 全场结束、还没绑账号——最想「留住成绩」的时刻，给个非强制入口 */}
+        {matchFinished && canSave && (
+          <button className="btn btn-save" onClick={onSave}>
+            💾 保存成绩到账号（换设备也能找回）
+          </button>
+        )}
 
         <div className="sheet-actions">
           <button className="btn btn-ghost" onClick={() => setShowProfile(true)}>

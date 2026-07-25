@@ -168,13 +168,19 @@ async function playerId(): Promise<string> {
   return playerReady;
 }
 
-async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(
+  url: string,
+  init: RequestInit = {},
+  { retryOn401 = true }: { retryOn401?: boolean } = {},
+): Promise<T> {
   let res = await fetch(url, {
     ...init,
     headers: { ...(init.headers ?? {}), "X-Player-Id": await playerId() },
   });
-  if (res.status === 401) {
-    // 身份失效（服务端换过库/档案被清）：重新领一个再试一次
+  // 401 有两种含义，绝不能混：一种是「你的 playerId 失效了」（服务端换过库/档案
+  // 被清），该重领身份重试；另一种是登录密码错，那是业务结果，**碰身份就等于
+  // 一次失败登录把用户的匿名档案指针弄丢**。所以账号接口传 retryOn401=false。
+  if (res.status === 401 && retryOn401) {
     localStorage.removeItem(PLAYER_KEY);
     playerReady = null;
     res = await fetch(url, {
@@ -187,12 +193,20 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-async function post<T>(url: string, body?: unknown): Promise<T> {
-  return request<T>(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
+async function post<T>(
+  url: string,
+  body?: unknown,
+  opts?: { retryOn401?: boolean },
+): Promise<T> {
+  return request<T>(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    },
+    opts,
+  );
 }
 
 export const api = {
@@ -243,4 +257,52 @@ export const api = {
    */
   validate: (id: string, tiles: string, word: string, withTile?: string) =>
     post<Validation>(`/api/matches/${id}/validate`, { tiles, word, withTile }),
+
+  // ---- 账号 ----
+
+  /** 当前身份的登录态：未绑定 bound=false */
+  accountMe: () => request<AccountState>("/api/account/me"),
+
+  /** 把当前匿名身份升级成账号（历史单词本/战绩原地保留）。
+   *  retryOn401=false：注册失败（如身份问题）不该悄悄换掉本地身份。 */
+  register: (username: string, password: string, displayName: string) =>
+    post<{ displayName: string }>(
+      "/api/account/register",
+      { username, password, displayName },
+      { retryOn401: false },
+    ),
+
+  /**
+   * 登录已有账号。服务端发回该账号的 playerId——写回 localStorage 顶替当前身份，
+   * 于是换设备/换浏览器也能接管同一份档案。返回后要重置 playerId 缓存。
+   *
+   * retryOn401=false 是关键：密码错也是 401，若走默认的重试逻辑，会把用户的
+   * 匿名 playerId 删掉重领——一次点错就丢了档案指针（测试bug.md）。
+   */
+  login: async (username: string, password: string) => {
+    const r = await post<{ playerId: string; displayName: string }>(
+      "/api/account/login",
+      { username, password },
+      { retryOn401: false },
+    );
+    localStorage.setItem(PLAYER_KEY, r.playerId);
+    playerReady = Promise.resolve(r.playerId);
+    return r;
+  },
+
+  /**
+   * 退出登录 = 领一个全新的匿名身份。账号数据安全躺在库里（登录可找回），
+   * 这台机器回到「干净匿名」——于是共享设备上换个人能注册/登录别的账号。
+   */
+  logout: async () => {
+    localStorage.removeItem(PLAYER_KEY);
+    playerReady = null;
+    await playerId(); // 立刻领一个新的匿名 id，后续请求不至于空手
+  },
 };
+
+export interface AccountState {
+  bound: boolean;
+  username?: string;
+  displayName?: string;
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AI_NAMES } from "./aiNames";
-import type { MatchConfig } from "./api";
+import { api, type AccountState, type MatchConfig } from "./api";
+import { Account } from "./components/Account";
 import { isMuted, setMuted } from "./sound";
 import { Hand } from "./components/Hand";
 import { Profile } from "./components/Profile";
@@ -33,7 +34,17 @@ const DEFAULTS: MatchConfig = {
 };
 
 /** 首页只做门面：是什么、为什么好玩、一个大大的「开始游戏」。配置全部收进设置页。 */
-function Landing({ onStart, onRules }: { onStart: () => void; onRules: () => void }) {
+function Landing({
+  onStart,
+  onRules,
+  account,
+  onAccount,
+}: {
+  onStart: () => void;
+  onRules: () => void;
+  account: AccountState | null;
+  onAccount: () => void;
+}) {
   const [showProfile, setShowProfile] = useState(false);
 
   return (
@@ -77,6 +88,9 @@ function Landing({ onStart, onRules }: { onStart: () => void; onRules: () => voi
         </button>
         <button className="btn btn-ghost" onClick={() => setShowProfile(true)}>
           📖 单词本
+        </button>
+        <button className="btn btn-ghost" onClick={onAccount}>
+          {account?.bound ? `👤 ${account.displayName}` : "🔑 登录 / 注册"}
         </button>
       </div>
 
@@ -321,6 +335,15 @@ export default function App() {
     setMuted(sound);
     setSound(!sound);
   };
+  /**
+   * 账号登录态。null=还没查；{bound:false}=匿名。顶栏和结算页据此决定
+   * 显示「登录」还是显示名。登录/注册成功后 onDone 直接更新，省一次往返。
+   */
+  const [account, setAccount] = useState<AccountState | null>(null);
+  const [accountTab, setAccountTab] = useState<"register" | "login" | null>(null);
+  useEffect(() => {
+    api.accountMe().then(setAccount).catch(() => setAccount({ bound: false }));
+  }, []);
 
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
@@ -354,9 +377,33 @@ export default function App() {
     }
   }, [config, g.busy, g.env]);
 
+  // 账号弹窗——首页和牌局里都可能打开，抽成共享元素避免每个分支重复
+  const accountModal = accountTab && (
+    <Account
+      account={account}
+      initialTab={accountTab}
+      onClose={() => setAccountTab(null)}
+      onDone={(displayName) => {
+        setAccount({ bound: true, displayName });
+        setAccountTab(null);
+      }}
+      onLogout={() => setAccount({ bound: false })}
+    />
+  );
+
   if (!config || !g.env) {
     if (view === "landing") {
-      return <Landing onStart={() => setView("setup")} onRules={() => setView("rules")} />;
+      return (
+        <>
+          <Landing
+            onStart={() => setView("setup")}
+            onRules={() => setView("rules")}
+            account={account}
+            onAccount={() => setAccountTab(account?.bound ? "login" : "register")}
+          />
+          {accountModal}
+        </>
+      );
     }
     if (view === "rules") {
       return <RulesPage onBack={() => setView("landing")} />;
@@ -418,6 +465,13 @@ export default function App() {
         </button>
         <button className="case-toggle" onClick={toggleSound} title="打牌、吃牌、胡牌的音效">
           音效 <b>{sound ? "开" : "关"}</b>
+        </button>
+        <button
+          className="case-toggle"
+          onClick={() => setAccountTab(account?.bound ? "login" : "register")}
+          title={account?.bound ? "账号" : "登录 / 注册"}
+        >
+          {account?.bound ? <>👤 <b>{account.displayName}</b></> : "登录"}
         </button>
       </header>
 
@@ -551,6 +605,8 @@ export default function App() {
           result={result}
           state={state}
           matchFinished={matchFinished}
+          canSave={account !== null && !account.bound}
+          onSave={() => setAccountTab("register")}
           onNext={g.nextGame}
           onRestart={() => {
             history.replaceState(null, "", window.location.pathname);
@@ -558,6 +614,7 @@ export default function App() {
           }}
         />
       )}
+      {accountModal}
     </div>
   );
 }
