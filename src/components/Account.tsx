@@ -61,9 +61,15 @@ export function Account({
               className="btn btn-primary"
               onClick={async () => {
                 setBusy(true);
-                await api.logout();
-                onLogout();
-                onClose();
+                try {
+                  await api.logout();
+                  onLogout();
+                  onClose();
+                } finally {
+                  // 不 finally 的话，logout 一旦抛异常，busy 永远回不来：
+                  // 弹窗两个按钮全灰、也关不掉，只能刷新页面
+                  setBusy(false);
+                }
               }}
               disabled={busy}
             >
@@ -99,12 +105,20 @@ export function Account({
         r = await api.login(username, password);
       } else {
         // 注册＝绑定当前 playerId。若正从某个账号「切换」过来，当前 id 已绑定，
-        // 得先登出换一个干净的匿名 id，新账号才不会撞 409、也不会继承旧号的数据。
-        if (account?.bound) {
-          await api.logout();
-          onLogout();
+        // 得先换一个干净的匿名 id，新账号才不会撞 409、也不会继承旧号的数据。
+        //
+        // 但换之前要**留个底**：注册可能失败（用户名被占用、网络错），失败了得把
+        // 旧身份原样放回去。否则用户只是想开个新号，填错一次用户名就再也不是原来
+        // 那个人了——和「切换后反悔回不去」是同一类过早提交副作用。
+        // 也正因为要回滚，这里不通知 App 登出：注册成功由下面的 onDone 覆盖登录态。
+        const prevId = account?.bound ? api.currentPlayerId() : null;
+        if (prevId) await api.logout();
+        try {
+          r = await api.register(username, password, displayName);
+        } catch (e) {
+          if (prevId) api.usePlayer(prevId);
+          throw e;
         }
-        r = await api.register(username, password, displayName);
       }
       onDone(r.displayName);
     } catch (e) {

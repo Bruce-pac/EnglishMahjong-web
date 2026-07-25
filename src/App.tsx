@@ -336,14 +336,22 @@ export default function App() {
     setSound(!sound);
   };
   /**
-   * 账号登录态。null=还没查；{bound:false}=匿名。顶栏和结算页据此决定
-   * 显示「登录」还是显示名。登录/注册成功后 onDone 直接更新，省一次往返。
+   * 账号登录态。null=还没查**或者查失败**；{bound:false}=确认是匿名。
+   * 顶栏和结算页据此决定显示「登录」还是显示名。登录/注册成功后 onDone 直接更新，
+   * 省一次往返。
+   *
+   * 查失败时必须留在 null，不能当成匿名：已登录的用户会看到「保存成绩」入口，
+   * 一点就拿着已绑定的 playerId 去注册，撞回一句莫名其妙的「当前身份已经绑定过
+   * 账号了」。null 时结算页不出这个入口，顶栏的入口也只开登录 tab（登录对两种
+   * 身份都安全）。
    */
   const [account, setAccount] = useState<AccountState | null>(null);
   const [accountTab, setAccountTab] = useState<"register" | "login" | null>(null);
   useEffect(() => {
-    api.accountMe().then(setAccount).catch(() => setAccount({ bound: false }));
+    api.accountMe().then(setAccount).catch(() => setAccount(null));
   }, []);
+  // 登录态未知时一律走登录 tab，别诱导用户去注册
+  const openAccount = () => setAccountTab(account && !account.bound ? "register" : "login");
 
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
@@ -399,7 +407,7 @@ export default function App() {
             onStart={() => setView("setup")}
             onRules={() => setView("rules")}
             account={account}
-            onAccount={() => setAccountTab(account?.bound ? "login" : "register")}
+            onAccount={openAccount}
           />
           {accountModal}
         </>
@@ -468,7 +476,7 @@ export default function App() {
         </button>
         <button
           className="case-toggle"
-          onClick={() => setAccountTab(account?.bound ? "login" : "register")}
+          onClick={openAccount}
           title={account?.bound ? "账号" : "登录 / 注册"}
         >
           {account?.bound ? <>👤 <b>{account.displayName}</b></> : "登录"}

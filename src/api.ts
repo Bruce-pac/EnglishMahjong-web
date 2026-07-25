@@ -157,7 +157,7 @@ let playerReady: Promise<string> | null = null;
 
 async function playerId(): Promise<string> {
   if (playerReady) return playerReady;
-  playerReady = (async () => {
+  const pending = (async () => {
     const saved = localStorage.getItem(PLAYER_KEY);
     if (saved) return saved;
     const res = await fetch("/api/players", { method: "POST" });
@@ -165,7 +165,13 @@ async function playerId(): Promise<string> {
     localStorage.setItem(PLAYER_KEY, data.playerId);
     return data.playerId as string;
   })();
-  return playerReady;
+  // 失败别把这个 rejected promise 缓存住——否则网络抖一下，之后每个请求都拿到
+  // 同一个失败结果，页面从此彻底不能用，只能刷新。
+  pending.catch(() => {
+    if (playerReady === pending) playerReady = null;
+  });
+  playerReady = pending;
+  return pending;
 }
 
 async function request<T>(
@@ -293,11 +299,27 @@ export const api = {
   /**
    * 退出登录 = 领一个全新的匿名身份。账号数据安全躺在库里（登录可找回），
    * 这台机器回到「干净匿名」——于是共享设备上换个人能注册/登录别的账号。
+   *
+   * 领新 id 失败**不算退出失败**：本地身份已经清掉，「已退出」这个事实成立，
+   * 下一个请求会自己再领一次。这里若把异常抛出去，调用方的 busy 就再也回不来。
    */
   logout: async () => {
     localStorage.removeItem(PLAYER_KEY);
     playerReady = null;
-    await playerId(); // 立刻领一个新的匿名 id，后续请求不至于空手
+    try {
+      await playerId(); // 立刻领一个新的匿名 id，后续请求不至于空手
+    } catch {
+      /* 交给下次请求重试 */
+    }
+  },
+
+  /** 当前本地身份。切换账号前留个底，注册失败好原样回滚（见 Account.tsx） */
+  currentPlayerId: () => localStorage.getItem(PLAYER_KEY),
+
+  /** 把本地身份强制换回指定 id——只给上面那个回滚用 */
+  usePlayer: (id: string) => {
+    localStorage.setItem(PLAYER_KEY, id);
+    playerReady = Promise.resolve(id);
   },
 };
 
