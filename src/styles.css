@@ -643,8 +643,43 @@ header b {
 .landing {
   max-width: 860px;
   margin: 0 auto;
-  padding: 56px 20px 24px;
+  padding: 18px 20px 24px;
   text-align: center;
+}
+
+/* 右上角的身份条。做成低对比的文字 chip，不是第四个按钮——它是页面「机框」的
+   一部分（和牌局顶栏同一个位置），不该和中间的行动区抢注意力。
+   用 flex 行而不是绝对定位：绝对定位在窄屏上会压到 hero 上。 */
+.landing-top {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 30px;
+  margin-bottom: 20px;
+}
+.id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: none;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: #9fc3b0;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.id-chip:hover {
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.08);
+}
+/* 已登录的信号就这一个金点，不用「👤」那种图标 */
+.id-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gold);
 }
 .hero-tiles {
   display: inline-flex;
@@ -708,11 +743,77 @@ header b {
   border-radius: 12px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
-.landing-links {
-  margin-top: 16px;
+/* 主动作 + 次级文字链，竖排居中，共用页面那条中轴 */
+.landing-actions {
   display: flex;
-  justify-content: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+/* 次级动作的通用样式：没有描边、没有底色，绝不会被误读成第二个按钮 */
+.text-link {
+  border: 0;
+  background: none;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 14px;
+  color: #a8cbb8;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.text-link:hover {
+  color: var(--gold);
+  border-bottom-color: rgba(212, 162, 76, 0.55);
+}
+
+/* 老玩家的复习卡。左侧一道金边＝账本条目/书签，和上面三张玻璃质感的
+   .feature-card 明确区分：那三张讲「这游戏是什么」，这张讲「你是谁」。 */
+.resume-card {
+  /* 宽度贴着内容走，而不是定死一个框。定死的话，牌摆不满时右边空一截，
+     看着像「明明放得下却没放」；贴着内容就没有这种错觉了（测试bug.md）。
+     封顶 560px：再宽牌就换行，一行超过四个词也读不动了。 */
+  width: fit-content;
+  max-width: 560px;
+  margin: 36px auto 0;
+  /* 窄屏把左右内边距收一点：390px 手机上按原来的 22/20，内容区只差 7px 就能并排
+     放下两个四字母的词，硬生生挤成一词一行。clamp 顶宽时仍是原值，不用媒体查询。 */
+  padding: 18px clamp(13px, 4vw, 22px) 18px clamp(13px, 4vw, 20px);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 3px solid var(--gold);
+  border-radius: 12px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+.resume-stat {
+  margin: 0;
+  font-size: 13.5px;
+  color: #cfe3d8;
+}
+.resume-stat b {
+  color: var(--gold);
+  font-size: 15px;
+  margin: 0 2px;
+}
+.resume-words {
+  display: flex;
+  flex-wrap: wrap;
+  /* 词间距明显大于词内 3px，一眼看得出这是几个词而不是一串字母 */
+  gap: 12px 22px;
+  /* 小牌自带 4px 的立体投影，底下留出空间免得被下一行压住 */
+  padding-bottom: 4px;
+}
+.resume-word {
+  display: inline-flex;
+  gap: 3px;
+}
+.resume-go {
+  padding-left: 0;
 }
 
 .rules-card {

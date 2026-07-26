@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AI_NAMES } from "./aiNames";
-import { api, type AccountState, type MatchConfig } from "./api";
+import { api, type AccountState, type MatchConfig, type ProfileData } from "./api";
 import { Account } from "./components/Account";
 import { isMuted, setMuted } from "./sound";
 import { Hand } from "./components/Hand";
@@ -33,22 +33,113 @@ const DEFAULTS: MatchConfig = {
   maxGames: 4,
 };
 
-/** 首页只做门面：是什么、为什么好玩、一个大大的「开始游戏」。配置全部收进设置页。 */
+/** 首页复习卡上摆几张牌：最近拼出的词，总数封顶免得长词把一行撑爆。 */
+/**
+ * 复习卡上摆几个词。
+ *
+ * 容量按**大约两行**给，不是按一行——多数人的错题就只有一两三个（线上实测 14 个
+ * 有错题的玩家里 11 个是 1~3 个），卡得太死就会出现「文案写 3 个、牌只摆 2 个、
+ * 右边还空着」，粗看像是没渲染全（测试bug.md）。摆得下就全摆出来，
+ * 摆不下才由调用方改口说「比如」。
+ *
+ * 库里最长的词 9 个字母（330px），卡片一行放得下 455px，所以单个词不会被折断。
+ */
+const MAX_SHOWCASE_WORDS = 4;
+// 按像素收而不是按字母数：字母数一样、词数不同，实际宽度差着好几十像素（词间距 22px）。
+// 收在**一行**以内——挂单一个词的第二行看着就是没排整齐。窄屏放不下自然会换行，
+// 那是设备决定的，不是这里算错了。
+const CARD_CONTENT_PX = 515; // 卡片封顶 560 − 左右内边距和左边那道金边
+const TILE_PX = 34;
+const TILE_GAP_PX = 3;
+const WORD_GAP_PX = 22;
+
+const wordPx = (word: string) => word.length * TILE_PX + (word.length - 1) * TILE_GAP_PX;
+
+function showcaseWords(words: string[]): string[] {
+  const picked: string[] = [];
+  let used = 0;
+  for (const word of words) {
+    if (picked.length >= MAX_SHOWCASE_WORDS) break;
+    const next = used + (picked.length ? WORD_GAP_PX : 0) + wordPx(word);
+    if (next > CARD_CONTENT_PX) continue; // 这个摆不下，试下一个更短的
+    picked.push(word);
+    used = next;
+  }
+  return picked;
+}
+
+/** 首页只做门面：是什么、为什么好玩、一个大大的「开始游戏」。配置全部收进设置页。
+ *
+ * 页面上只有**一个**主动作。以前「游戏规则 / 单词本 / 登录注册」三个同款描边按钮
+ * 并排贴在 CTA 底下，眼睛读成四个按钮，主次就没了；而这三件事根本不同类——
+ * 一个是页面跳转、一个是个人数据、一个是全局账号状态。现在各归各位：
+ * 账号去右上角常驻，规则降为 CTA 底下的文字链，单词本沉到下面变成一张
+ * 有真实内容的卡片（且只在你真攒下东西时才出现）。
+ */
 function Landing({
   onStart,
   onRules,
   account,
   onAccount,
+  identityRev,
 }: {
   onStart: () => void;
   onRules: () => void;
   account: AccountState | null;
   onAccount: () => void;
+  identityRev: number;
 }) {
   const [showProfile, setShowProfile] = useState(false);
+  // 复习卡的数据。拉失败就当没有——首页少一张卡而已，不值得打扰用户。
+  //
+  // 依赖 identityRev 而不是空数组：登录/注册/退出换掉的是本地 playerId，而档案是
+  // 跟着 playerId 走的。只在挂载时拉一次的话，退出登录后卡片还挂着上一个人的词
+  // （测试bug.md）。先清空再拉，也免得新身份的数据到位前那几百毫秒里露着旧的。
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setProfile(null);
+    api.profile().then(
+      (p) => alive && setProfile(p),
+      () => alive && setProfile(null),
+    );
+    // 连着切两次账号时，先发的请求可能后到——过期的响应直接丢掉
+    return () => {
+      alive = false;
+    };
+  }, [identityRev]);
+
+  const learned = profile?.correct.length ?? 0;
+  const toReview = profile?.wrong.length ?? 0;
+  // 卡片摆的是**错题**：它叫复习卡，该摆没拿下的词，不是已经会了的。
+  // 服务端的错题按「漏过次数」倒序发来（db.get_profile），排在前面的正是最该先看的。
+  // 一个错题都没有的人另说——那时摆拼出过的词，是战果不是待办。
+  const source =
+    toReview > 0
+      ? (profile?.wrong ?? []).map((w) => w.word)
+      : (profile?.correct ?? []).map((w) => w.word);
+  const showcase = showcaseWords(source);
+  // 摆全了就直接冒号引出，没摆全才改口说「比如」。数字和牌对不上是最容易被
+  // 当成 bug 的细节——文案报总数、牌只摆样本，用户一数就觉得少渲染了。
+  const lead = showcase.length < source.length ? "，比如：" : "：";
 
   return (
     <div className="landing">
+      {/* 账号是全局状态，不是「我现在要不要玩」的选项——所以放右上角常驻，
+          和牌局里顶栏一个位置，别混进中间的行动区 */}
+      <div className="landing-top">
+        <button className="id-chip" onClick={onAccount}>
+          {account?.bound ? (
+            <>
+              <span className="id-dot" aria-hidden="true" />
+              {account.displayName}
+            </>
+          ) : (
+            "登录 / 注册"
+          )}
+        </button>
+      </div>
+
       <div className="hero">
         {/* 用游戏里真实的牌当 logo——元音红、辅音黑，一眼看出这是字母麻将 */}
         <div className="hero-tiles">
@@ -78,21 +169,67 @@ function Landing({
         </div>
       </div>
 
-      <button className="btn btn-primary btn-cta" onClick={onStart}>
-        ▶ 开始游戏
-      </button>
-
-      <div className="landing-links">
-        <button className="btn btn-ghost" onClick={onRules}>
-          ❓ 游戏规则
+      {/* 一主一次：都是「进入这个游戏」的路径，一个去玩，一个先看怎么玩。
+          次级动作用文字链而不是第二个方框，CTA 才保得住唯一性。
+          放下方居中而不是并排右侧：上面 hero 全在一条中轴上，并排会让 CTA
+          偏离轴心，看着像失误而不像设计。 */}
+      <div className="landing-actions">
+        <button className="btn btn-primary btn-cta" onClick={onStart}>
+          ▶ 开始游戏
         </button>
-        <button className="btn btn-ghost" onClick={() => setShowProfile(true)}>
-          📖 单词本
-        </button>
-        <button className="btn btn-ghost" onClick={onAccount}>
-          {account?.bound ? `👤 ${account.displayName}` : "🔑 登录 / 注册"}
+        <button className="text-link" onClick={onRules}>
+          完整规则 →
         </button>
       </div>
+
+      {/* 复习卡：只有真攒下东西了才出现。新用户因此看到的是一个更干净的首页——
+          一个动作，不做选择题；空的单词本点进去也是死路。
+          牌是这个产品最独特的视觉资产，用它比再画一个通用统计卡有辨识度。 */}
+      {(learned > 0 || toReview > 0) && (
+        <div className="resume-card">
+          {/* 句子必须交代清楚下面摆的是哪一组词——牌本身分不出对错，
+              光写个数字，用户没法知道这几张是「已经会的」还是「漏掉的」 */}
+          <p className="resume-stat">
+            {toReview === 0 ? (
+              <>
+                你拼出过 <b>{learned}</b> 个词，一个都没漏{lead}
+              </>
+            ) : learned > 0 ? (
+              <>
+                你拼出过 <b>{learned}</b> 个词，还漏掉 <b>{toReview}</b> 个{lead}
+              </>
+            ) : (
+              // 打完一局一个词都没拼出来的新手。只甩一个「还漏掉 N 个」，第一印象
+              // 就是「你输了」——这是教学工具，不能这么迎接人。
+              // 鼓励得说真话：「漏掉」在本游戏里的定义是**手里本来有牌却没看出来**
+              // （RULES.md §9），不是「你不认识这个词」。把这点讲清楚比空喊加油有用，
+              // 因为它确实成立：这些词本来就够得着。
+              <>
+                这 <b>{toReview}</b> 个词你手里本来有牌，只是没看出来——
+                {/* 这一支不用通用的 lead：「下次就能拿下，比如：」里的「比如」
+                    离它指代的名词太远，读着别扭，所以两种收尾各写一句 */}
+                {showcase.length < source.length ? "先从这几个练起：" : "下次就能拿下："}
+              </>
+            )}
+          </p>
+
+          {showcase.length > 0 && (
+            <div className="resume-words">
+              {showcase.map((word) => (
+                <span className="resume-word" key={word}>
+                  {[...word].map((letter, i) => (
+                    <Tile key={i} tile={letter} small />
+                  ))}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <button className="text-link resume-go" onClick={() => setShowProfile(true)}>
+            打开单词本 →
+          </button>
+        </div>
+      )}
 
       <div className="rules-card" id="rules">
         <h2>游戏规则</h2>
@@ -353,6 +490,15 @@ export default function App() {
   // 登录态未知时一律走登录 tab，别诱导用户去注册
   const openAccount = () => setAccountTab(account && !account.bound ? "register" : "login");
 
+  /**
+   * 身份换代计数。登录、注册、退出登录都会让本地 playerId 指向另一份档案，
+   * 而挂在档案上的界面（首页复习卡）自己看不见这件事——+1 就是通知它们重拉。
+   * 用计数而不是把 account 对象当依赖：accountMe 首次落地也会换 account 的引用，
+   * 那会白白多拉一次档案。
+   */
+  const [identityRev, setIdentityRev] = useState(0);
+  const bumpIdentity = () => setIdentityRev((n) => n + 1);
+
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
   const resume = g.resume;
@@ -394,8 +540,12 @@ export default function App() {
       onDone={(displayName) => {
         setAccount({ bound: true, displayName });
         setAccountTab(null);
+        bumpIdentity(); // 登录接管了别人的档案；注册虽是原地升级，白拉一次也无害
       }}
-      onLogout={() => setAccount({ bound: false })}
+      onLogout={() => {
+        setAccount({ bound: false });
+        bumpIdentity(); // 退出＝换了个全新匿名身份，档案得跟着清空
+      }}
     />
   );
 
@@ -408,6 +558,7 @@ export default function App() {
             onRules={() => setView("rules")}
             account={account}
             onAccount={openAccount}
+            identityRev={identityRev}
           />
           {accountModal}
         </>
