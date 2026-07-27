@@ -1102,6 +1102,12 @@ header b {
   padding: 26px 30px;
   max-width: 820px;
   width: 100%;
+  /* 内容比视口高时，仅靠 .overlay 的 align-items:center 会把顶部切掉**而且滚不上去**
+     （flex 居中的经典陷阱：溢出往两端跑，scrollTop 到 0 也够不着上半截）。
+     margin:auto 优先于 align-items，有空间时照样居中，没空间时老实从顶部排，
+     配合 .overlay 的 overflow:auto 就能完整滚到。
+     排行榜 20 行首次撞上，但结算页词多时、矮屏上的账号弹窗也有同样的问题。 */
+  margin: auto;
 }
 .rank-note {
   margin: -4px 0 10px;
@@ -1686,4 +1692,137 @@ header b {
   color: #d9e4dc;
   font-size: 13px;
   line-height: 1.5;
+}
+
+/* ---------- 排行榜 ---------- */
+
+.sheet-leaderboard {
+  max-width: 560px;
+  width: 100%;
+}
+/* 三个榜的高度不一样，固定个下限，切换时弹窗不会跳来跳去 */
+.lb-body {
+  min-height: 210px;
+  margin-top: 16px;
+}
+.lb-note {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #cfe3d8;
+}
+.lb-caption {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: #9fc3b0;
+}
+
+/* 百分位条 */
+.lb-pct {
+  margin-bottom: 18px;
+}
+.lb-pct-head {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+.lb-pct-head b {
+  color: var(--gold);
+  font-size: 17px;
+}
+.lb-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+.lb-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ddb05e, var(--gold));
+}
+
+/* 榜单表格。窄屏也别横向溢出——名字列自己截断 */
+.lb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.lb-table td {
+  padding: 9px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.lb-rank {
+  width: 2.4em;
+  text-align: center;
+  color: #9fc3b0;
+}
+.lb-name {
+  max-width: 0;
+  width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-val {
+  text-align: right;
+  white-space: nowrap;
+}
+.lb-sub {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #9fc3b0;
+}
+/* 「我」那一行高亮——靠服务端算好的 isMe，不靠下发 id */
+.lb-me {
+  background: rgba(212, 162, 76, 0.12);
+}
+.lb-you {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #3a2a08;
+  font-size: 11px;
+  font-weight: 700;
+}
+/* 匿名玩家的注册钩子 */
+.lb-bind {
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--gold);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+  color: #cfe3d8;
+}
+
+/* 首页复习卡上的百分位行 */
+.resume-standing {
+  margin: 0;
+  font-size: 13px;
+  color: #cfe3d8;
+}
+.resume-standing b {
+  color: var(--gold);
+  font-size: 15px;
+}
+.resume-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+
+/* 结算页的名次行 */
+.standing-line {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #cfe3d8;
+}
+.standing-line b {
+  color: var(--gold);
+  font-size: 15px;
+}
+.standing-line .text-link {
+  margin-left: 10px;
 }

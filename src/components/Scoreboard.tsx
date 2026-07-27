@@ -6,13 +6,38 @@
  * 这一栏就永远是空的。
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AI_NAMES } from "../aiNames";
-import type { Result, State } from "../api";
+import { api, type MyStanding, type Result, type State } from "../api";
+import { Leaderboard } from "./Leaderboard";
 import { Profile } from "./Profile";
 import { Tile } from "./Tile";
 
 const MEDALS = ["🥇", "🥈", "🥉", "4️⃣"];
+
+/**
+ * 场末的「我在全站什么位置」一行。自己拉数据——它和这一局的结果无关，
+ * 是跨场累积的档案，塞进 envelope 反而会让每局结算都白背一份。
+ *
+ * 拉失败或还没数据就整行不显示：结算页已经够满了，不值得为它加一行报错。
+ */
+function StandingLine({ onOpen }: { onOpen: () => void }) {
+  const [me, setMe] = useState<MyStanding | null>(null);
+  useEffect(() => {
+    api.leaderboard().then((d) => setMe(d.me), () => setMe(null));
+  }, []);
+
+  if (!me) return null;
+  return (
+    <p className="standing-line">
+      全站累计第 <b>{me.scoreRank}</b> 名
+      {me.scorePercentile !== null && <> · 平均分超过 <b>{me.scorePercentile}%</b> 的其他玩家</>}
+      <button className="text-link" onClick={onOpen}>
+        看完整榜单 →
+      </button>
+    </p>
+  );
+}
 
 interface Props {
   result: Result;
@@ -35,6 +60,7 @@ export function Scoreboard({
   onRestart,
 }: Props) {
   const [showProfile, setShowProfile] = useState(false);
+  const [showBoard, setShowBoard] = useState(false);
 
   return (
     <div className="overlay">
@@ -110,6 +136,11 @@ export function Scoreboard({
           )}
         </div>
 
+        {/* 全场结束＝情绪最高点，正好问「我算什么水平」。这是排行榜的主入口，
+            也和下面的「保存成绩」呼应：未绑定的人看到自己上榜却显示「(匿名)」，
+            比任何文案都能推动注册。 */}
+        {matchFinished && <StandingLine onOpen={() => setShowBoard(true)} />}
+
         {/* 全场结束、还没绑账号——最想「留住成绩」的时刻，给个非强制入口 */}
         {matchFinished && canSave && (
           <button className="btn btn-save" onClick={onSave}>
@@ -134,6 +165,7 @@ export function Scoreboard({
       </div>
 
       {showProfile && <Profile onClose={() => setShowProfile(false)} />}
+      {showBoard && <Leaderboard onClose={() => setShowBoard(false)} />}
     </div>
   );
 }

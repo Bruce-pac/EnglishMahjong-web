@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { AI_NAMES } from "./aiNames";
-import { api, type AccountState, type MatchConfig, type ProfileData } from "./api";
+import { api, type AccountState, type MatchConfig, type MyStanding, type ProfileData } from "./api";
 import { Account } from "./components/Account";
 import { isMuted, setMuted } from "./sound";
 import { Hand } from "./components/Hand";
 import { Profile } from "./components/Profile";
 import { RulesPage } from "./components/RulesPage";
+import { Leaderboard } from "./components/Leaderboard";
 import { Scoreboard } from "./components/Scoreboard";
+import { Seg } from "./components/Seg";
 import { Spectating } from "./components/Spectating";
 import { Table } from "./components/Table";
 import { Tile } from "./components/Tile";
@@ -90,6 +92,7 @@ function Landing({
   identityRev: number;
 }) {
   const [showProfile, setShowProfile] = useState(false);
+  const [showBoard, setShowBoard] = useState(false);
   // 复习卡的数据。拉失败就当没有——首页少一张卡而已，不值得打扰用户。
   //
   // 依赖 identityRev 而不是空数组：登录/注册/退出换掉的是本地 playerId，而档案是
@@ -104,6 +107,20 @@ function Landing({
       () => alive && setProfile(null),
     );
     // 连着切两次账号时，先发的请求可能后到——过期的响应直接丢掉
+    return () => {
+      alive = false;
+    };
+  }, [identityRev]);
+
+  // 百分位也挂在复习卡上，所以和上面同一个依赖：换账号后一起刷新
+  const [standing, setStanding] = useState<MyStanding | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setStanding(null);
+    api.leaderboard().then(
+      (d) => alive && setStanding(d.me),
+      () => alive && setStanding(null),
+    );
     return () => {
       alive = false;
     };
@@ -225,11 +242,27 @@ function Landing({
             </div>
           )}
 
-          <button className="text-link resume-go" onClick={() => setShowProfile(true)}>
-            打开单词本 →
-          </button>
+          {/* 百分位：和复习卡合并，不新增卡片——首页只有一个主动作，别再胖一圈。
+              分母是**其他**玩家（见 db._percentile），文案不能省掉「其他」二字 */}
+          {standing && standing.scorePercentile !== null && (
+            <p className="resume-standing">
+              平均分超过了 <b>{standing.scorePercentile}%</b> 的其他玩家
+              {standing.wordRank && <> · 认识词数第 {standing.wordRank} 名</>}
+            </p>
+          )}
+
+          <div className="resume-links">
+            <button className="text-link resume-go" onClick={() => setShowProfile(true)}>
+              打开单词本 →
+            </button>
+            <button className="text-link resume-go" onClick={() => setShowBoard(true)}>
+              看排行榜 →
+            </button>
+          </div>
         </div>
       )}
+
+      {showBoard && <Leaderboard onClose={() => setShowBoard(false)} />}
 
       <div className="rules-card" id="rules">
         <h2>游戏规则</h2>
@@ -282,30 +315,6 @@ function Landing({
   );
 }
 
-/** 分段选择：一排大按钮，选中态高亮。移动端也点得准，不用下拉框。 */
-function Seg({
-  options,
-  value,
-  onChange,
-}: {
-  options: [string | number, string][];
-  value: string | number;
-  onChange: (v: string | number) => void;
-}) {
-  return (
-    <div className="seg">
-      {options.map(([v, label]) => (
-        <button
-          key={v}
-          className={v === value ? "seg-btn seg-on" : "seg-btn"}
-          onClick={() => onChange(v)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** 开关行：标签 + 说明 + 滑动开关 */
 function Switch({

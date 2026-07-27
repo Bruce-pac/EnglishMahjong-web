@@ -134,6 +134,44 @@ export interface ProfileData {
   games: { played: number; won: number };
 }
 
+/**
+ * 排行榜。**服务端绝不下发别人的 playerId**（那是身份凭证），所以这里没有 id 字段，
+ * 「哪一行是我」靠服务端算好的 isMe。
+ */
+export interface LeaderRow {
+  rank: number;
+  /** 未绑定账号的显示「(匿名)」——绑定后才有昵称，这是本榜的注册转化点 */
+  name: string;
+  isMe: boolean;
+  /** 累计分榜有，词数榜没有 */
+  games?: number;
+  score?: number;
+  wins?: number;
+  /** 词数榜有——**只算自己看出来的词**，比单词本里的数字小 */
+  words?: number;
+}
+
+export interface MyStanding {
+  /** 我在榜上有没有名字。由服务端判定——前端别拿 "(匿名)" 去字符串比对 */
+  bound: boolean;
+  games: number;
+  avgScore: number;
+  score: number;
+  scoreRank: number;
+  /** 超过了百分之几的**其他**玩家。只有自己一个人时为 null */
+  scorePercentile: number | null;
+  words: number;
+  wordRank: number | null;
+  wordPercentile: number | null;
+}
+
+export interface LeaderboardData {
+  scores: LeaderRow[];
+  words: LeaderRow[];
+  /** 还没打过局时为 null——前端据此显示引导态，不要显示 0% */
+  me: MyStanding | null;
+}
+
 export interface MatchConfig {
   tier: string;
   minWordLen: number;
@@ -223,6 +261,9 @@ export const api = {
 
   /** 单词本：正题集 / 错题集 / 战绩，跨场累积 */
   profile: () => request<ProfileData>("/api/profile"),
+
+  /** 排行榜：两个榜 + 我的位置，一次给全 */
+  leaderboard: () => request<LeaderboardData>("/api/leaderboard"),
 
   /** 释义 + 音标（本地词表，查不到 found=false） */
   define: (word: string) =>
