@@ -1205,10 +1205,15 @@ header b {
   display: flex;
   gap: 3px;
 }
+/* 弹窗底部的动作行（排行榜、单词本、结算页共用）。
+   margin-top 必须有：上面的内容各式各样（表格、词框、文字），指望每个调用方
+   自己留出下边距是靠不住的——排行榜的榜单最后一行就曾经直接贴在「关闭」上。
+   相邻兄弟的 margin 会合并，所以调用方自己再留边距也不会叠成双份。 */
 .sheet-actions {
   display: flex;
   justify-content: center;
   gap: 12px;
+  margin-top: 20px;
 }
 
 .error {
@@ -1814,8 +1819,11 @@ header b {
 }
 
 /* 结算页的名次行 */
+/* 下边距不能是 0：已绑定账号的人没有「保存成绩」按钮，这一行会直接贴在
+   「单词本 / 再开一场」上（实测间距 0px）。20px 跟上面 .profile 的节奏一致。
+   上边距写 4px 就够——它会和 .profile 的 20px 合并，实际仍是 20px。 */
 .standing-line {
-  margin: 4px 0 0;
+  margin: 4px 0 20px;
   font-size: 13px;
   color: #cfe3d8;
 }
