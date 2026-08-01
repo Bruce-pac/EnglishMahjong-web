@@ -10,7 +10,7 @@ import { Leaderboard } from "./components/Leaderboard";
 import { Scoreboard } from "./components/Scoreboard";
 import { Seg } from "./components/Seg";
 import { Spectating } from "./components/Spectating";
-import { Table } from "./components/Table";
+import { TableScene } from "./scene/TableScene";
 import { Tile } from "./components/Tile";
 import { WordTiles } from "./components/WordTiles";
 import { useGame } from "./hooks/useGame";
@@ -465,7 +465,7 @@ export default function App() {
   /**
    * 发牌动画：开新局的那一瞬三家依次落牌，和发牌音效同步。
    * 只在这一小段时间内为真——常驻的话，对手每次摸牌新挂一张牌背都会跟着抖。
-   * 窗口要比动画本身（最后一张约 860ms 落定，见 Table.tsx）留足余量，
+   * 窗口要比动画本身（最后一张约 860ms 落定，见 scene/Seat.tsx）留足余量，
    * 否则类被撤掉时最后几张牌会直接跳到终点。
    */
   const [dealing, setDealing] = useState(false);
@@ -655,12 +655,13 @@ export default function App() {
         </div>
       )}
 
-      <Table
+      <TableScene
         others={state.others}
         discards={state.discards}
         turn={state.turn}
         live={live}
         dealing={dealing}
+        replay={g.replay}
       />
 
       {/* 我亮出的明词 */}

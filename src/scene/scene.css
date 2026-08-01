@@ -1,0 +1,413 @@
+/* 场景层样式：2.5D 舞台。
+ *
+ * 全站只有这个文件出现 3D 变换——需要阅读的文字（名字、亮词、气泡）都留在
+ * 未变换的屏幕空间，防止 transform 下文字发虚（styles.css 头部的约定同样适用：
+ * 动画只用 transform/opacity，课堂低配设备要流畅）。
+ *
+ * ⚠️ 打包顺序：本文件由 TableScene.tsx import，而 styles.css 由 main.tsx 在 App
+ * **之后**才 import——模块图先走 App 的依赖，所以打出来的 CSS 里 scene.css 在
+ * styles.css **前面**。想盖住 styles.css 的规则只能靠更高的特异性
+ * （例如 `.seat-slot .opponent`），靠"写在后面"是无效的。
+ */
+
+/* ---------- 舞台 ---------- */
+
+/* 占据 header 和手牌区之间的全部空间。perspective 放在这层：
+   子元素里只有 .table-surface 做 3D 旋转，视点略高于中心（origin 30%），
+   看桌子是「俯视 + 前倾」，和真人坐在桌边的视角一致。 */
+.scene-stage {
+  /* 倾角和桌面尺寸抽成变量：窄屏降级只改这三个值，姿态计算全都跟着走
+     （对家竖立的牌用 calc(-1 * var(--tilt)) 反算，永远和桌面对得上）。 */
+  --tilt: 38deg;
+  --table-w: min(880px, 68vw);
+  /* 进深要放得下一堵 13 张的牌墙（13 × 23.7 ≈ 308px，再加牌高 40）*/
+  --table-h: 470px;
+
+  flex: 1;
+  position: relative;
+  /* 视野角开大一点（distance 小＝FOV 宽）：CSS 透视的离轴角本来只有十几度，
+     牌的侧面几乎露不出来。800px 是牌的体积感和桌面变形之间的折中。 */
+  perspective: 800px;
+  perspective-origin: 50% 22%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 500px;
+  /* 「房间」暗底：body 本身就是毛毡绿，不压暗周围的话，桌面和背景同色，
+     桌子只剩一圈木边在飘（没有这层时的实测效果）。压暗一圈既让台面跳出来，
+     又比整块换底色更自然——像一盏灯打在桌子上。 */
+  background: radial-gradient(ellipse 70% 60% at 50% 45%, rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.52));
+  border-radius: 18px;
+}
+
+/* ---------- 桌面 ---------- */
+
+/* 一整张实体桌：毛毡台面 + 木纹包边 + 大投影。
+   rotateX 正角度 = 顶边向远处倒下去，形成透视。38° 下牌面字母的纵向
+   压缩约 cos38° ≈ 0.79，仍可读。preserve-3d 让桌面上的牌共享这个平面。 */
+.table-surface {
+  position: relative;
+  width: var(--table-w);
+  height: var(--table-h);
+  transform: rotateX(var(--tilt));
+  transform-style: preserve-3d;
+  border-radius: 28px;
+  /* 台面（padding-box）比 --felt 亮一档：暗底之上要「被照亮」才像实物。
+     木边（border-box）用渐变：上沿受光、下沿背光，一眼看出是有厚度的框。
+     **不能用 border-image 画木纹**——它会让 border-radius 失效，圆桌角变直角。 */
+  border: 12px solid transparent;
+  background:
+    radial-gradient(ellipse at 50% 36%, #35a077 0%, #2a8a66 48%, var(--felt-dark) 100%) padding-box,
+    linear-gradient(160deg, #a8794a, #6b4a2b 55%, #4a3220) border-box;
+  box-shadow:
+    inset 0 0 44px rgba(0, 0, 0, 0.32),
+    0 3px 0 #4a3220,
+    0 26px 44px rgba(0, 0, 0, 0.5);
+}
+
+/* 牌河躺在桌面平面里（.table-surface 的子元素天然继承倾斜）。
+   尺寸用百分比跟着桌面走，不再是平面时代那种固定 min/max 宽的卡片。 */
+.table-surface .river {
+  position: absolute;
+  /* 四边留白要让得出三堵牌墙：上边让给对家那堵，左右让给两侧的墙，
+     不然牌河的框会被墙压住一角 */
+  left: 24%;
+  right: 24%;
+  top: 26%;
+  bottom: 8%;
+  /* 台面上一块略深的「牌河区」，圈出弃牌该落哪儿，但不要抢台面的存在感 */
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 14px;
+  box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.28);
+  padding: 10px 12px;
+}
+
+/* 倾斜平面里的小字会压缩，字号上调一档补偿 */
+.table-surface .river-label {
+  font-size: 13px;
+}
+.table-surface .river-live {
+  font-size: 14px;
+}
+
+/* 弃牌不平摊在桌面上，而是往后仰一点——字母更正对玩家（牌面是教学内容，
+   可读性优先），顺带让牌河看着像一堆立着的牌而不是贴纸。
+   姿态挂在牌本体：落牌动效 tile-throw 挂在外层 .river-slot 上，两者不打架。 */
+.table-surface .river-slot .tile {
+  transform: rotateX(calc(-0.55 * var(--tilt)));
+  transform-origin: bottom center;
+}
+
+/* ---------- 桌面上的三家手牌 ---------- */
+
+/* 牌背排。preserve-3d 必须一路传下来（容器自己带 translate 会新建变换上下文，
+   不写 preserve-3d 的话子元素的 rotateX 会被压平回 2D）。 */
+.seat-hand {
+  position: absolute;
+  display: flex;
+  transform-style: preserve-3d;
+}
+.seat-back-slot {
+  transform-style: preserve-3d;
+  line-height: 0; /* 去掉 inline 元素的基线间隙，牌才能真正贴紧 */
+}
+
+/* ---------- 三家的牌墙（SVG，屏幕空间） ---------- */
+
+/* 牌墙由 Wall.tsx 用 SVG 画好，这里只管**摆在哪**和**配色**。
+   它们是 .scene-stage 的直接子元素，不进 .table-surface 那层 3D 变换——
+   进去会被再变换一次，透视就成双份的了。 */
+.wall {
+  position: absolute;
+  overflow: visible;   /* 内容画在 viewBox 外，靠矩阵定位 */
+  width: 1px;
+  height: 1px;
+  z-index: 1;          /* 压在桌面之上、席位卡（--z-seat）之下 */
+  pointer-events: none;
+  /* 窄屏时桌子会缩，墙得跟着缩，否则会探出桌面。缩放锚在墙的起点上。 */
+  transform: scale(var(--wall-scale, 1));
+  transform-origin: 0 0;
+  filter: drop-shadow(0 4px 5px rgba(6, 40, 28, 0.45));
+}
+
+/* 三堵墙的落点：贴着桌子三条边。起点是「最靠南那张牌、朝桌心一侧的底角」，
+   墙从这里往里长；对家那堵的居中量在 Wall.tsx 里按张数算。 */
+.wall-far {
+  left: 50%;
+  top: 30%;
+}
+.wall-left {
+  left: 24.5%;
+  top: 86%;
+}
+.wall-right {
+  left: 75.5%;
+  top: 86%;
+}
+
+/* 发牌：牌沿墙逐张落位。只动 transform/opacity，低配设备也只是合成层位移。 */
+@keyframes wall-drop {
+  from {
+    transform: translateY(-14px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.wall.dealing .wall-tile {
+  animation: wall-drop 0.26s cubic-bezier(0.2, 0.85, 0.3, 1) backwards;
+}
+
+/* ---------- 席位（屏幕空间，不参与 3D） ---------- */
+
+/* 对手的名字/亮词是要读的文字，全部贴在桌子三边外侧的屏幕空间。
+   绝对定位在舞台上：对家顶部居中、上家左侧、下家右侧。 */
+.seat-slot {
+  position: absolute;
+  z-index: var(--z-seat); /* 浮在桌沿之上；层级表在 styles.css 的 :root */
+}
+.seat-slot-top {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.seat-slot-left {
+  left: 7%;
+  top: 46%;
+  transform: translateY(-50%);
+}
+.seat-slot-right {
+  right: 7%;
+  top: 46%;
+  transform: translateY(-50%);
+}
+
+/* 舞台上的席位卡：**不要卡片外观**。平面布局时代它是张深色卡（深底 + 边框 +
+   min-width 190px），摆到舞台上就是三个空荡荡的黑框（实测效果，所以那套样式
+   已经从 styles.css 删掉了）。这里只管把「形象 + 名字 + 词」竖着码齐，
+   当前行动者的高亮交给形象自己发光（.avatar-thinking）。 */
+.seat-slot .opponent {
+  max-width: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.seat-slot .opponent-name {
+  /* 舞台底色比原来的卡片深，名字压暗了会看不清 */
+  color: #e2f0e8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  margin: 2px 0 0;
+}
+.seat-slot .opponent-active .opponent-name {
+  color: var(--gold);
+}
+.seat-slot .opponent-words {
+  justify-content: center;
+}
+
+/* 对家头顶到桌沿只有一条窄带，亮词若和左右家一样竖着堆，很快就压到桌面上去
+   （诸葛大力是长词流，亮 4、5 个词很常见）。所以这一家横着排：形象、名字、
+   词并成一行，把上方的横向空间用起来。
+   **必须放在 `.seat-slot .opponent` 之后**——两者特异性相同，靠后者才盖得住
+   上面那条 flex-direction: column。 */
+.seat-slot-top .opponent {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  max-width: min(880px, 68vw);
+}
+.seat-slot-top .opponent-name {
+  margin: 0;
+  white-space: nowrap;
+}
+.seat-slot-top .opponent-words {
+  margin-top: 0;
+}
+
+/* ---------- 卡通形象 ---------- */
+
+.seat-head {
+  position: relative;
+}
+
+/* 圆形底座：形象像坐在一个小台子上，也把它和背景分开 */
+.avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.24));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 状态之间的姿态变化（前倾/弹跳）走 transform，低配设备也只是合成层位移 */
+  transition: transform 0.18s ease;
+}
+
+/* 待机：慢慢眨眼。只动 scaleY，不触发重排 */
+@keyframes avatar-blink {
+  0%, 92%, 100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+.avatar-eyes {
+  transform-origin: center 44px;
+  animation: avatar-blink 5.5s ease-in-out infinite;
+}
+
+/* 思考：整个形象轻轻前倾摇晃——「它在想」比一个静止头像有说服力得多 */
+@keyframes avatar-think {
+  0%, 100% {
+    transform: translateY(-2px) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(2deg);
+  }
+}
+.avatar-thinking {
+  animation: avatar-think 1.6s ease-in-out infinite;
+  box-shadow: 0 0 0 2px var(--gold), 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* 出牌：往下一顿，像把牌拍在桌上 */
+@keyframes avatar-hit {
+  0% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(5px) scale(1.04);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+.avatar-discard {
+  animation: avatar-hit 0.32s ease-out;
+}
+
+/* 吃 / 胡：跳一下 */
+@keyframes avatar-jump {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-8px) scale(1.06);
+  }
+}
+.avatar-call,
+.avatar-win {
+  animation: avatar-jump 0.42s ease-out;
+}
+
+/* 喊话气泡。绝对定位在形象右上角，不占布局——否则每次冒泡整张卡都会跳一下 */
+.seat-bubble {
+  position: absolute;
+  left: 60px;
+  top: -4px;
+  white-space: nowrap;
+  background: var(--paper);
+  color: #3a2a08;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  animation: bubble-pop 0.22s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+@keyframes bubble-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+/* 思考中的「…」淡一点、不喧哗；吃/胡的喊话才用亮色 */
+.seat-bubble-thinking {
+  background: rgba(0, 0, 0, 0.45);
+  color: #d8e8df;
+  font-weight: 400;
+  letter-spacing: 2px;
+}
+.seat-bubble-call,
+.seat-bubble-win {
+  background: var(--gold);
+}
+
+/* ---------- 窄屏降级 ---------- */
+
+/* 平板竖屏 / 小笔记本：桌子压小、倾角放平（视口一窄，38° 的透视会把桌面挤成
+   一条缝），席位卡贴紧两侧。改的全是变量，姿态计算自动跟上。 */
+@media (max-width: 1080px) {
+  .scene-stage {
+    --tilt: 30deg;
+    --table-w: min(600px, 64vw);
+    --table-h: 360px;
+    --wall-scale: 0.82;
+    perspective: 900px;
+  }
+  .avatar,
+  .avatar svg {
+    width: 58px;
+    height: 58px;
+  }
+  .seat-slot-left {
+    left: 2%;
+  }
+  .seat-slot-right {
+    right: 2%;
+  }
+  .seat-slot .opponent {
+    max-width: 180px;
+  }
+}
+
+@media (max-width: 820px) {
+  .scene-stage {
+    --tilt: 24deg;
+    --table-w: 78vw;
+    --table-h: 300px;
+    --wall-scale: 0.66;
+    min-height: 340px;
+  }
+  /* 两侧再挤不出一整列的宽度了，席位卡改挂在桌角斜上方 */
+  .seat-slot-left,
+  .seat-slot-right {
+    top: 10%;
+    transform: none;
+  }
+  /* 桌子在这个断点更扁更宽，墙的落点得跟着往外挪，否则会飘在毛毡中间 */
+  .wall-left {
+    left: 17%;
+    top: 80%;
+  }
+  .wall-right {
+    left: 83%;
+    top: 80%;
+  }
+  .wall-far {
+    top: 35%;
+  }
+  .avatar,
+  .avatar svg {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+/* 关掉待机/思考的循环动画：系统级「减少动态效果」是无障碍要求，
+   一直在晃的头像对前庭敏感的人是实打实的不适。一次性的落牌、弹跳留着——
+   它们是操作反馈，不是装饰。 */
+@media (prefers-reduced-motion: reduce) {
+  .avatar-eyes,
+  .avatar-thinking {
+    animation: none;
+  }
+}

@@ -11,8 +11,6 @@
  *     一旦声明了它代表哪个字母，牌面上就把那个字母显示出来。
  */
 
-import type { CSSProperties } from "react";
-
 const VOWELS = "aeiou";
 
 export const VOWEL_WILD = "1";
@@ -108,9 +106,4 @@ export function Tile({ tile, asLetter, selected, dimmed, small, order, onClick }
       {inner}
     </button>
   );
-}
-
-/** 牌背——对手的手牌只显示这个 */
-export function TileBack({ small, style }: { small?: boolean; style?: CSSProperties }) {
-  return <div className={`tile tile-back ${small ? "tile-small" : ""}`} style={style} />;
 }
