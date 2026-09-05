@@ -1,15 +1,18 @@
 import { useEffect, useRef } from "react";
-import * as THREE from "three";
+import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2 } from "three";
 import { WORLD_SIZE } from "./layout";
+import { MainView } from "./main-view";
+import { Animation } from "./utils";
 
 /**
- * 3D 牌桌页（骨架）。
+ * 3D 牌桌页。
  *
- * 这里是**裸 three.js**，不用 @react-three/fiber：React 只负责挂一个 <canvas> 和
+ * 这里是**裸 three.js**，不用 @react-three/fiber：React 只负责挂一个容器 div 和
  * 页面周边的 DOM 覆盖层，渲染循环由本组件自己用 requestAnimationFrame 驱动（D11）。
  * 组件卸载时必须把循环停掉并 dispose 掉 GPU 资源，否则来回切页会漏显存。
  *
- * 现在场景里只有一块桌面平面。牌、牌墙、相机操作分别在 T1.2 / T1.3 里加。
+ * 本组件只做三件事：建场景、收键鼠、每帧推进相机动画并渲染。
+ * 场景/相机/灯光/后处理都在 `main-view.ts`；牌是 T1.2；拾取与拖放是 T3.x。
  */
 export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -18,84 +21,132 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     const mount = mountRef.current;
     if (!mount) return;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    mount.appendChild(renderer.domElement);
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0f2f22);
+    // 世界坐标那一层。桌面和牌都挂这里，永不旋转（换座位转的是相机组）
+    const mainGroup = new Group();
+    mainGroup.matrixAutoUpdate = false;
 
     // 桌面 174×174，右手系、z 向上。
     //
     // 174 不是随手取的：牌尺寸已经定死为 Size.TILE = (6, 9, 4)（需求文档 §7.1，
-    // models.glb 就是按这个导出的），而 Autotable 的 World.WIDTH 正是 174——
-    // 牌宽 6 / 桌宽 174 = 3.4%，与真实麻将（26mm / 900mm ≈ 2.9%）接近。
-    // 桌子若给 90，同样的牌就占到 6.7%，看起来大一倍；更要命的是 T1.1 要移植的
-    // setup-slots 整套格子坐标都是按 174 写的，桌子对不上就得重算 300 多行。
-    //
-    // 所以 1 个单位 ≈ 5.2 毫米，不是 1 厘米。
-    // T1.1 已把它提成 layout.ts 的 WORLD_SIZE——Slot.rotate() 拿同一个值当旋转中心，
-    // 两处对不上的话四家的槽位会绕着错误的圆心转。
-    const TABLE = WORLD_SIZE;
-    const table = new THREE.Mesh(
-      new THREE.PlaneGeometry(TABLE, TABLE),
-      new THREE.MeshLambertMaterial({ color: 0x1d6b4a }),
-    );
-    scene.add(table);
+    // models.glb 就是按这个导出的），牌宽 6 / 桌宽 174 = 3.4%，与真实麻将
+    // （26mm / 900mm ≈ 2.9%）接近。所以 1 个单位 ≈ 5.2 毫米，不是 1 厘米。
+    // 常量在 layout.ts，Slot.rotate() 拿同一个值当旋转中心——两处对不上的话
+    // 四家的槽位会绕着错误的圆心转。
+    const tableGeometry = new PlaneGeometry(WORLD_SIZE, WORLD_SIZE);
+    const tableMaterial = new MeshLambertMaterial({ color: 0x1d6b4a });
+    const table = new Mesh(tableGeometry, tableMaterial);
+    // 槽位坐标是 0..174，桌面几何是以原点为中心的，所以要挪半个身位对上
+    table.position.set(WORLD_SIZE / 2, WORLD_SIZE / 2, 0);
+    table.matrixAutoUpdate = false;
+    table.updateMatrix();
+    mainGroup.add(table);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-    const key = new THREE.DirectionalLight(0xffffff, 1.0);
-    key.position.set(0, -40, 60);
-    scene.add(key);
+    const view = new MainView(mount, mainGroup);
 
-    // 正交相机是默认形态（D13），透视切换留给 T1.3
-    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
-    camera.position.set(0, -60, 70);
-    camera.up.set(0, 0, 1);
-    camera.lookAt(0, 0, 0);
+    // ---- 相机的三个连续参数（D13）----
+    // 全部由 Animation 驱动，150ms 缓动。瞬切很晕，而且看不出是自己按的
+    const lookDown = new Animation(150);
+    const zoom = new Animation(150);
+    /** 鼠标在画面里的归一化坐标（-1..1）。放大时相机跟着它平移 */
+    const mouse2 = new Vector2(0, 0);
+    let hasMouse = false;
+    /** 已按下的键。按住不放时浏览器会重复触发 keydown，用它去重 */
+    const keys = new Set<string>();
 
-    const resize = () => {
-      const w = mount.clientWidth;
-      const h = mount.clientHeight;
-      if (w === 0 || h === 0) return;
-      renderer.setSize(w, h, false);
-      // 保证桌面在任何窗口比例下都完整入画：短边贴合桌面，长边留白
-      const half = TABLE * 0.6;
-      const aspect = w / h;
-      camera.left = aspect >= 1 ? -half * aspect : -half;
-      camera.right = -camera.left;
-      camera.top = aspect >= 1 ? half : half / aspect;
-      camera.bottom = -camera.top;
-      camera.updateProjectionMatrix();
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = view.canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      mouse2.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -(((e.clientY - rect.top) / rect.height) * 2 - 1),
+      );
+      hasMouse = true;
     };
-    resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(mount);
+    const onMouseLeave = () => {
+      hasMouse = false;
+    };
 
-    // 自建 mainLoop：每帧一次 render，卸载时用 raf 句柄取消
+    const onKeyDown = (e: KeyboardEvent) => {
+      // 输入框里打字不该把镜头晃起来（T6.1 的吃牌输入框就是个 input）
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (keys.has(e.key)) return;
+      keys.add(e.key);
+
+      switch (e.key) {
+        case " ":
+          lookDown.start(1);
+          e.preventDefault(); // 空格默认会滚动页面
+          break;
+        case "z":
+          zoom.start(1);
+          break;
+        case "x":
+          zoom.start(-1);
+          break;
+        case "p":
+          view.setPerspective(!view.isPerspective);
+          break;
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      keys.delete(e.key);
+      // 松开就回弹。不判 activeElement——按下时在画布上、松开时焦点跑了的话，
+      // 不回弹会让镜头永远卡在低头状态
+      if (e.key === " " || e.key === "z" || e.key === "x") {
+        (e.key === " " ? lookDown : zoom).start(0);
+      }
+    };
+    // 切到别的标签页再回来，keyup 收不到，键会卡住
+    const onBlur = () => {
+      keys.clear();
+      lookDown.start(0);
+      zoom.start(0);
+    };
+
+    mount.addEventListener("mousemove", onMouseMove);
+    mount.addEventListener("mouseleave", onMouseLeave);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+
+    // 自建 mainLoop：每帧推进动画、对齐画布、摆相机、渲染
     let raf = 0;
     const mainLoop = () => {
       raf = requestAnimationFrame(mainLoop);
-      renderer.render(scene, camera);
+      lookDown.update();
+      zoom.update();
+      view.updateViewport();
+      // 单人对局座位恒为 0（需求文档 §1：1 真人 + 3 AI）
+      view.updateCamera(0, lookDown.pos, zoom.pos, hasMouse ? mouse2 : null);
+      view.render();
     };
     mainLoop();
 
     return () => {
       cancelAnimationFrame(raf);
-      observer.disconnect();
-      table.geometry.dispose();
-      (table.material as THREE.Material).dispose();
-      renderer.dispose();
-      mount.removeChild(renderer.domElement);
+      mount.removeEventListener("mousemove", onMouseMove);
+      mount.removeEventListener("mouseleave", onMouseLeave);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+      tableGeometry.dispose();
+      tableMaterial.dispose();
+      view.dispose();
     };
   }, []);
 
   return (
     <div className="table3d-page">
-      <div className="table3d-canvas" ref={mountRef} />
+      <div className="table3d-stage">
+        <div className="table3d-canvas" ref={mountRef} />
+      </div>
       <button className="table3d-back" onClick={onBack}>
         ← 返回
       </button>
+      <div className="table3d-hint">
+        空格 低头 · z / x 缩放 · p 切透视
+      </div>
     </div>
   );
 }

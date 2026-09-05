@@ -1788,18 +1788,37 @@ button.footer-link {
   cursor: pointer;
 }
 
+/* 底色用黑：画面比例固定 1.5（见 main-view.ts 的 RATIO），窗口不是这个比例就留边，
+   而画布默认也是清成黑的——两边同色才像是有意的黑边，不像渲染坏了。
+   （别改成跟桌面同色去「无缝」：清屏色要过 OutputPass 的 sRGB 转换，
+   CSS 那边不过，两边永远对不齐。） */
 .table3d-page {
   position: fixed;
   inset: 0;
-  background: #0f2f22;
+  background: #000;
 }
-/* canvas 由 three.js 插进来，用 block 免得行内元素底部留白导致每帧 resize 抖动 */
-.table3d-canvas {
+/* 画面比例固定 1.5（见 main-view.ts 的 RATIO），窗口不是这个比例就居中留黑边 */
+.table3d-stage {
   width: 100%;
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+/* 尺寸由 MainView.updateViewport 写死在 style 上，这里不要设 width/height。
+   canvas 用 block 免得行内元素底部留白导致每帧 resize 抖动 */
 .table3d-canvas canvas {
   display: block;
+}
+.table3d-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  color: #9fc3b0;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  pointer-events: none;
 }
 .table3d-back {
   position: absolute;
