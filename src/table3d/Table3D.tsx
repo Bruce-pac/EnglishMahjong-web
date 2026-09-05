@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { WORLD_SIZE } from "./layout";
 
 /**
  * 3D 牌桌页（骨架）。
@@ -32,8 +33,10 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     // 桌子若给 90，同样的牌就占到 6.7%，看起来大一倍；更要命的是 T1.1 要移植的
     // setup-slots 整套格子坐标都是按 174 写的，桌子对不上就得重算 300 多行。
     //
-    // 所以 1 个单位 ≈ 5.2 毫米，不是 1 厘米。T1.1 引入 World 后这个常量搬过去当 World.WIDTH。
-    const TABLE = 174;
+    // 所以 1 个单位 ≈ 5.2 毫米，不是 1 厘米。
+    // T1.1 已把它提成 layout.ts 的 WORLD_SIZE——Slot.rotate() 拿同一个值当旋转中心，
+    // 两处对不上的话四家的槽位会绕着错误的圆心转。
+    const TABLE = WORLD_SIZE;
     const table = new THREE.Mesh(
       new THREE.PlaneGeometry(TABLE, TABLE),
       new THREE.MeshLambertMaterial({ color: 0x1d6b4a }),
