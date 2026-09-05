@@ -24,8 +24,16 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0f2f22);
 
-    // 桌面：1 个单位 = 1 厘米，桌面按真牌桌大小给 90×90，牌面朝 +z（右手系，z 向上）
-    const TABLE = 90;
+    // 桌面 174×174，右手系、z 向上。
+    //
+    // 174 不是随手取的：牌尺寸已经定死为 Size.TILE = (6, 9, 4)（需求文档 §7.1，
+    // models.glb 就是按这个导出的），而 Autotable 的 World.WIDTH 正是 174——
+    // 牌宽 6 / 桌宽 174 = 3.4%，与真实麻将（26mm / 900mm ≈ 2.9%）接近。
+    // 桌子若给 90，同样的牌就占到 6.7%，看起来大一倍；更要命的是 T1.1 要移植的
+    // setup-slots 整套格子坐标都是按 174 写的，桌子对不上就得重算 300 多行。
+    //
+    // 所以 1 个单位 ≈ 5.2 毫米，不是 1 厘米。T1.1 引入 World 后这个常量搬过去当 World.WIDTH。
+    const TABLE = 174;
     const table = new THREE.Mesh(
       new THREE.PlaneGeometry(TABLE, TABLE),
       new THREE.MeshLambertMaterial({ color: 0x1d6b4a }),
