@@ -29,15 +29,11 @@ export class AssetLoader {
   async loadAll(): Promise<void> {
     await Promise.all([this.loadTexture(tilesUrl, "tiles"), this.loadModels(modelsUrl)]);
 
-    // **图集以 web/img/tiles.png 为准，不用 glb 里那一份。**
+    // 图集来自 web/img/tiles.png，glb 里没有贴图。
     //
-    // `art/export.py` 会把图集烘进 glb（bufferView 里嵌了一张 image/png），于是同一张
-    // 图被打包两遍（glb 220KB 里有 214KB 是它）。更要命的是 GLTFLoader 把内嵌图解成
-    // blob: URL 再交给浏览器解码，这一步在无头 Chrome 里会失败——材质拿不到 map，
-    // three.js 就不会生成 `vMapUv`，注入的着色器当场编译不过（undeclared identifier）。
-    //
-    // 两个问题一起解决：加载完就把所有材质的 map 换成我们自己加载的 tiles.png。
-    // glb 内嵌的那份只当作 UV 的载体，像素数据一概不用。
+    // `art/export.py` 用 `export_image_format="NONE"` 导出，图集不烘进 glb——我们只有
+    // 一张图集，内嵌就是同一张图打包两遍（实测多 214KB）。glb 只负责几何体和 UV。
+    // 所以材质从 glTF 出来时 map 是空的，这里补上。
     for (const mesh of Object.values(this.meshes)) {
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const m of materials) {
@@ -114,24 +110,24 @@ export class AssetLoader {
     mesh.material = Array.isArray(mesh.material)
       ? mesh.material.map((m) => this.processMaterial(m))
       : this.processMaterial(mesh.material);
-    this.toZUp(mesh);
+    this.checkOrientation(mesh);
     return mesh;
   }
 
   /**
-   * 把模型从 glTF 的 Y-up 转回我们用的 Z-up。
+   * 校验模型的朝向与尺寸。**不做任何旋转**——朝向是在 Blender 里摆好的。
    *
-   * `art/make_model.py` 在 Blender 里是按「牌面朝 +Z、尺寸 6×9×4」建的（需求文档 §7.1），
-   * 但 glTF 规定 Y 轴朝上，Blender 导出时会自动绕 X 转 -90°。导出来的 tile 于是变成
-   * **6×4×9、牌面朝 +Y**，而 `Size.TILE` 和整套槽位坐标都假定牌面朝 +Z。
+   * glTF 规定 Y 轴朝上，Blender 是 Z-up，导出器会做 `glTF (x,y,z) = Blender (x,z,-y)`
+   * 的变换。所以 `art/make_model.py` 把牌**立着**建（Blender 里 6×4×9、正面朝 −Y），
+   * 变换之后正好是我们要的 6×9×4、正面朝 +Z。Autotable 的 models.blend 也是这么建的，
+   * 它的前端同样一行旋转都没有。
    *
-   * 不转的后果不是报错，是**每张牌都以侧面朝着相机**——渲染出来是一片没有字母的
-   * 米色方块，看起来像「贴图没加载」，很难往坐标轴上想。所以这里转回来，并当场校验
-   * 包围盒确实等于 Size.TILE：将来谁重新导出 glb 改了朝向约定，会在这里直接炸掉，
-   * 而不是又渲染出一桌白板。
+   * 躺着建的话导出来是 6×4×9、正面朝 +Y，后果不是报错，而是**每张牌都侧面朝着相机**
+   * ——渲染出来是一桌没有字母的米色方块，看起来像「贴图没加载」，很难往坐标轴上想。
+   * 所以这里当场校验包围盒等于 Size.TILE：谁重新导出 glb 时改了朝向约定，
+   * 会在这儿直接炸掉，而不是又渲染出一桌白板。
    */
-  private toZUp(mesh: Mesh): void {
-    mesh.geometry.rotateX(Math.PI / 2); // +Y → +Z
+  private checkOrientation(mesh: Mesh): void {
     mesh.geometry.computeBoundingBox();
     const box = mesh.geometry.boundingBox as Box3;
     const size = box.getSize(new Vector3());
