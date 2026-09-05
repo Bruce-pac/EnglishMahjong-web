@@ -1774,3 +1774,47 @@ header b {
 .standing-line .text-link {
   margin-left: 10px;
 }
+
+
+/* ---------- 3D 牌桌页（开发中，与 2.5D 并存） ---------- */
+
+/* 首页底栏的 3D 入口是个 button，得先把浏览器默认的按钮外观抹掉，
+   才能和旁边的 <a class="footer-link"> 长得一样 */
+button.footer-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.table3d-page {
+  position: fixed;
+  inset: 0;
+  background: #0f2f22;
+}
+/* canvas 由 three.js 插进来，用 block 免得行内元素底部留白导致每帧 resize 抖动 */
+.table3d-canvas {
+  width: 100%;
+  height: 100%;
+}
+.table3d-canvas canvas {
+  display: block;
+}
+.table3d-back {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #e8f2ec;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.table3d-back:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}

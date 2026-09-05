@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { AI_NAMES } from "./aiNames";
 import { api, type AccountState, type MatchConfig, type MyStanding, type ProfileData } from "./api";
 import { Account } from "./components/Account";
@@ -14,6 +14,12 @@ import { TableScene } from "./scene/TableScene";
 import { Tile } from "./components/Tile";
 import { WordTiles } from "./components/WordTiles";
 import { useGame } from "./hooks/useGame";
+
+/**
+ * 3D 牌桌按需加载：three.js 有 500KB 上下，而 2.5D 才是并存期的主路径，
+ * 直接 import 会让每个进首页的人白下一份。
+ */
+const Table3D = lazy(() => import("./table3d/Table3D").then((m) => ({ default: m.Table3D })));
 
 const TIERS = [
   ["junior", "初中"],
@@ -81,12 +87,14 @@ function showcaseWords(words: string[]): string[] {
 function Landing({
   onStart,
   onRules,
+  onTable3D,
   account,
   onAccount,
   identityRev,
 }: {
   onStart: () => void;
   onRules: () => void;
+  onTable3D: () => void;
   account: AccountState | null;
   onAccount: () => void;
   identityRev: number;
@@ -291,6 +299,11 @@ function Landing({
       </div>
 
       <div className="landing-footer">
+        {/* 3D 牌桌还在开发中，入口先放这儿——2.5D 页仍是主路径（D1 并存期） */}
+        <button className="footer-link" onClick={onTable3D}>
+          🀄 试试 3D 牌桌（开发中）
+        </button>
+        <span className="footer-dot">·</span>
         <a
           className="footer-link"
           href="https://github.com/Bruce-pac/EnglishMahjong-web"
@@ -443,7 +456,7 @@ function Setup({ onStart, onBack }: { onStart: (c: MatchConfig) => void; onBack:
 export default function App() {
   const g = useGame();
   const [config, setConfig] = useState<MatchConfig | null>(null);
-  const [view, setView] = useState<"landing" | "setup" | "rules">("landing");
+  const [view, setView] = useState<"landing" | "setup" | "rules" | "table3d">("landing");
   /** 提示面板点的词：交给 Hand 铺好选牌，亮不亮玩家自己定 */
   const [hintPick, setHintPick] = useState<{ word: string; nonce: number } | null>(null);
   /**
@@ -565,6 +578,7 @@ export default function App() {
           <Landing
             onStart={() => setView("setup")}
             onRules={() => setView("rules")}
+            onTable3D={() => setView("table3d")}
             account={account}
             onAccount={openAccount}
             identityRev={identityRev}
@@ -575,6 +589,13 @@ export default function App() {
     }
     if (view === "rules") {
       return <RulesPage onBack={() => setView("landing")} />;
+    }
+    if (view === "table3d") {
+      return (
+        <Suspense fallback={<div className="table3d-page" />}>
+          <Table3D onBack={() => setView("landing")} />
+        </Suspense>
+      );
     }
     return (
       <Setup
