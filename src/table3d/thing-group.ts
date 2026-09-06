@@ -47,6 +47,8 @@ export class TileThingGroup {
   private startIndex = 0;
   private meshes: Array<Mesh> = [];
   private instancedMesh: InstancedMesh | null = null;
+  /** 上一次提交的牌面编号，按组内下标。快路径靠它差分出「只有哪几张真的换了脸」 */
+  private typeIndexes: Array<number> = [];
   private readonly zero = new Matrix4().makeScale(0, 0, 0);
 
   constructor(assetLoader: AssetLoader, group: Group) {
@@ -168,6 +170,80 @@ if (vMapUv.x <= ${TILE_DU} && vMapUv.y <= ${TILE_DV}) {
     }
     this.instancedMesh = this.createInstancedMesh(params);
     this.group.add(this.instancedMesh);
+    this.typeIndexes = params.map((p) => p.typeIndex);
+  }
+
+  /** 这一批 params 能不能走快路径。形状（张数、起始下标、index 连续性）变了就不行 */
+  canUpdateTypes(startIndex: number, params: Array<ThingParams>): boolean {
+    if (this.instancedMesh === null) return false;
+    if (startIndex !== this.startIndex) return false;
+    if (params.length !== this.typeIndexes.length) return false;
+    for (let i = 0; i < params.length; i++) {
+      if (params[i].index !== this.startIndex + i) return false;
+    }
+    return true;
+  }
+
+  /**
+   * 快路径：只换牌面，不重建。
+   *
+   * 白搭赋值、切大小写都只改 typeIndex（§4.9），整批 dispose 重建太浪费——
+   * 切一次大小写影响十几张牌。
+   *
+   * **两处都要改**：instanced 那边原地改 `offset` 属性；独立 Mesh 走不了 instance
+   * 属性、UV 偏移被烘进了克隆的几何体（见 createMesh），只能重建——但**只重建
+   * typeIndex 真的变了的那几个**，靠 typeIndexes 快照差分。
+   *
+   * 调用前必须先过 `canUpdateTypes()`。
+   */
+  updateTypes(params: Array<ThingParams>): void {
+    const inst = this.instancedMesh!;
+    const attr = inst.geometry.getAttribute("offset") as InstancedBufferAttribute;
+    const data = attr.array as Float32Array;
+
+    for (let i = 0; i < params.length; i++) {
+      const next = params[i].typeIndex;
+      if (next === this.typeIndexes[i]) continue;
+
+      const [x, y, z] = faceOffset(next);
+      data[3 * i] = x;
+      data[3 * i + 1] = y;
+      data[3 * i + 2] = z;
+
+      // 独立 Mesh 的 UV 烘死在几何体里，改不了，只能换一个
+      const old = this.meshes[i];
+      const mesh = this.createMesh(next);
+      mesh.matrixAutoUpdate = false;
+      mesh.visible = old.visible;
+      mesh.position.copy(old.position);
+      mesh.quaternion.copy(old.quaternion);
+      mesh.updateMatrix();
+      (old.material as Material).dispose();
+      old.geometry.dispose();
+      this.group.remove(old);
+      this.meshes[i] = mesh;
+      this.group.add(mesh);
+
+      this.typeIndexes[i] = next;
+    }
+    attr.needsUpdate = true;
+  }
+
+  /** 测试用：读回当前提交的牌面编号快照 */
+  get committedTypeIndexes(): ReadonlyArray<number> {
+    return this.typeIndexes;
+  }
+
+  /** 测试用：读回 instance 的 offset 属性数组（不变式 2 要逐项比对） */
+  get offsetAttribute(): InstancedBufferAttribute | null {
+    if (!this.instancedMesh) return null;
+    return this.instancedMesh.geometry.getAttribute("offset") as InstancedBufferAttribute;
+  }
+
+  /** 测试用：读回某张牌独立 Mesh 的 uv 数组 */
+  meshUv(i: number): Float32Array | null {
+    const m = this.meshes[i];
+    return m ? (m.geometry.attributes.uv.array as Float32Array) : null;
   }
 
   setSimple(index: number, position: Vector3, rotation: Quaternion): void {
@@ -203,6 +279,7 @@ if (vMapUv.x <= ${TILE_DU} && vMapUv.y <= ${TILE_DV}) {
       this.group.remove(mesh);
     }
     this.meshes.splice(0);
+    this.typeIndexes = [];
     if (this.instancedMesh) {
       (this.instancedMesh.material as Material).dispose();
       this.instancedMesh.geometry.dispose();

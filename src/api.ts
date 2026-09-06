@@ -47,6 +47,14 @@ export interface State {
   wallLeft: number;
   turn: number;
   discards: Tile[];
+  /**
+   * 牌河每张的座位归属，与 `discards` 逐位对应（服务端 T0.4 加的）。
+   *
+   * 牌河要按传统麻将「各家身前一片」来摆，而刷新时 `events` 为空，
+   * 前端无从还原谁打了哪张；吃牌和点炮胡都会 pop 掉牌河末张，
+   * 靠「轮流打牌」反推必然错位。牌河在真麻将里完全公开，不涉及防作弊裁剪。
+   */
+  discardSeats: number[];
   finished: boolean;
   exhausted: boolean;
   me: Me;

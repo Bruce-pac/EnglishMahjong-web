@@ -73,6 +73,30 @@ export class ObjectView {
     this.tileGroup.replace(sorted[0].index, sorted);
   }
 
+  /**
+   * 只换牌面、不重建（T1.4 方案 §5）。白搭赋值、切大小写走这条。
+   *
+   * **两阶段：先全部试探、再统一提交。** 现在只有一个组，将来分组多了，
+   * 一半走快路径、另一半回退重建会让两边状态不同步——所以只要有一个组
+   * `canUpdateTypes()` 不通过，整批都回退到 `replaceThings()`。
+   *
+   * 调用方要**批量**触发：对账层输出整批 Placement，不要逐张调。
+   */
+  updateThingTypes(params: Array<ThingParams>): void {
+    if (params.length === 0) return;
+    const sorted = [...params].sort((a, b) => a.index - b.index);
+    if (!this.tileGroup.canUpdateTypes(sorted[0].index, sorted)) {
+      this.tileGroup.replace(sorted[0].index, sorted);
+      return;
+    }
+    this.tileGroup.updateTypes(sorted);
+  }
+
+  /** 测试用：透出渲染组，好让不变式 2 比对 offset 属性与 uv 数组 */
+  get tiles(): TileThingGroup {
+    return this.tileGroup;
+  }
+
   /** 铺静态槽位影子。槽位不变就只在开局调一次 */
   replaceShadows(places: Array<Place>): void {
     const dummy = new Object3D();
