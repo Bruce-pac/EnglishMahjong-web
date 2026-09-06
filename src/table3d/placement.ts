@@ -210,10 +210,14 @@ export function layout(state: State, loose: LooseSlots, display: DisplayState): 
   });
 
   // ---- 牌墙：只表达还剩多少张，全部背面、不可交互 ----
+  //
+  // **四家轮流分**，不是一家填满了再填下一家：需求文档 §3 要的是「四家各一段」，
+  // 按座位顺序铺的话开局就是 16/16/16/8，摸牌时还会整段整段地空掉一家——
+  // 看起来像谁的牌墙塌了。轮流分则四家同进同退（开局 14/14/14/14）。
   const perWall = WALL_ROWS * WALL_COLS;
   for (let k = 0; k < state.wallLeft && k < PLAYERS * perWall; k++) {
-    const seat = Math.floor(k / perWall);
-    const n = k % perWall;
+    const seat = k % PLAYERS;
+    const n = Math.floor(k / PLAYERS);
     out.push({
       slotName: `wall.${Math.floor(n / WALL_COLS)}.${n % WALL_COLS}@${seat}`,
       typeIndex: UNKNOWN_FACE,

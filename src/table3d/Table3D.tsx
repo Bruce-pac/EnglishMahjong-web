@@ -1,8 +1,44 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2 } from "three";
+import { api, type Envelope, type MatchConfig } from "../api";
+import { AssetLoader } from "./asset-loader";
 import { WORLD_SIZE } from "./layout";
 import { MainView } from "./main-view";
+import { ObjectView } from "./object-view";
+import * as persist from "./persist";
+import { TableView } from "./table-view";
 import { Animation } from "./utils";
+
+/**
+ * 3D 页自己开局用的配置。
+ *
+ * 与首页那套设置界面（`App.tsx` 的 Setup）无关——3D 页目前是个独立入口，
+ * 走的是「点进来就开一局」。接到正式的开局流程上是 T5.2 的事（那时才动 useGame）。
+ */
+const DEFAULT_CONFIG: MatchConfig = {
+  tier: "junior",
+  minWordLen: 2,
+  minWinWordLen: 0,
+  hints: false,
+  bloody: true,
+  difficulty: "normal",
+  maxGames: 4,
+};
+
+/**
+ * 地址栏参数。`?match=<id>` 是和 2.5D 页共用的牌局 id；`?view=3d` 是给 App.tsx
+ * 看的——没有它的话，带 match 参数刷新会被 2.5D 页接管（App.tsx 的恢复逻辑）。
+ */
+function readMatchId(): string | null {
+  return new URLSearchParams(window.location.search).get("match");
+}
+
+function writeMatchId(matchId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("match", matchId);
+  url.searchParams.set("view", "3d");
+  history.replaceState(null, "", url);
+}
 
 /**
  * 3D 牌桌页。
@@ -16,6 +52,8 @@ import { Animation } from "./utils";
  */
 export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [wallLeft, setWallLeft] = useState<number | null>(null);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -123,13 +161,55 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     };
     mainLoop();
 
+    // ---- 资源 → 场景 → envelope ----
+    //
+    // 全是异步的，而组件随时可能被卸载（点「返回」）。`alive` 是唯一的护栏：
+    // 每个 await 之后都要看一眼，否则会往已经 dispose 掉的场景里写东西。
+    let alive = true;
+    let objectView: ObjectView | null = null;
+
+    (async () => {
+      const assetLoader = new AssetLoader();
+      await assetLoader.loadAll();
+      if (!alive) return;
+
+      objectView = new ObjectView(mainGroup, assetLoader);
+      const tableView = new TableView(objectView);
+
+      // 刷新回来时优先接管原来那局（散牌区顺序存在 localStorage 里，靠 matchId 找）
+      const saved = readMatchId();
+      let env: Envelope;
+      if (saved) {
+        try {
+          env = await api.resume(saved);
+        } catch {
+          // 牌局只存内存，服务器重启就没了（DESIGN.md §3 的有意取舍）。
+          // 存档跟着清掉，然后当作新局开一把
+          persist.clear(saved);
+          if (!alive) return;
+          env = await api.newMatch(DEFAULT_CONFIG);
+        }
+      } else {
+        env = await api.newMatch(DEFAULT_CONFIG);
+      }
+      if (!alive) return;
+
+      writeMatchId(env.matchId);
+      tableView.apply(env);
+      setWallLeft(env.state.wallLeft);
+    })().catch((e) => {
+      if (alive) setError(e instanceof Error ? e.message : "开局失败");
+    });
+
     return () => {
+      alive = false;
       cancelAnimationFrame(raf);
       mount.removeEventListener("mousemove", onMouseMove);
       mount.removeEventListener("mouseleave", onMouseLeave);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+      objectView?.dispose();
       tableGeometry.dispose();
       tableMaterial.dispose();
       view.dispose();
@@ -145,7 +225,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         ← 返回
       </button>
       <div className="table3d-hint">
-        空格 低头 · z / x 缩放 · p 切透视
+        {error ?? (wallLeft === null ? "发牌中…" : `牌墙剩 ${wallLeft} 张 · 空格 低头 · z / x 缩放 · p 切透视`)}
       </div>
     </div>
   );

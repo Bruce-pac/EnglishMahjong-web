@@ -261,6 +261,23 @@ if (vMapUv.x <= ${TILE_DU} && vMapUv.y <= ${TILE_DV}) {
     this.instancedMesh!.instanceMatrix.needsUpdate = true;
   }
 
+  /**
+   * 把一个实例从画面上藏起来：矩阵置零（从批渲染里抹掉）＋ 独立 mesh 不显示。
+   *
+   * Thing 池是固定 108 个（`layout.ts` 的 TILE_COUNT），而任何一帧摆出来的牌
+   * 都可能少于 108——别家胡牌后 `concealed` 只覆盖一部分手牌、牌墙摸空之后
+   * 都会少几张。没有这条路的话，没被摆上桌的实例会顶着单位矩阵堆在原点，
+   * 桌角出现一坨谁也解释不了的牌。
+   */
+  setHidden(index: number): void {
+    const i = index - this.startIndex;
+    const mesh = this.meshes[i];
+    if (!mesh) return;
+    mesh.visible = false;
+    this.instancedMesh!.setMatrixAt(i, this.zero);
+    this.instancedMesh!.instanceMatrix.needsUpdate = true;
+  }
+
   setCustom(index: number, position: Vector3, rotation: Quaternion): Mesh {
     const i = index - this.startIndex;
     const mesh = this.meshes[i];

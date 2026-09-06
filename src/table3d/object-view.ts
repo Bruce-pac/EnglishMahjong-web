@@ -155,6 +155,11 @@ export class ObjectView {
     }
   }
 
+  /** 这一帧没被摆上桌的实例。见 `TileThingGroup.setHidden` */
+  hideThing(index: number): void {
+    this.tileGroup.setHidden(index);
+  }
+
   updateDropShadows(places: Array<Place>): void {
     for (const obj of this.dropShadowObjects) this.mainGroup.remove(obj);
     this.dropShadowObjects.splice(0);

@@ -456,7 +456,11 @@ function Setup({ onStart, onBack }: { onStart: (c: MatchConfig) => void; onBack:
 export default function App() {
   const g = useGame();
   const [config, setConfig] = useState<MatchConfig | null>(null);
-  const [view, setView] = useState<"landing" | "setup" | "rules" | "table3d">("landing");
+  // `?view=3d` 是 3D 页自己写进地址栏的（table3d/Table3D.tsx）：它和 2.5D 页共用
+  // `?match=<id>`，没有这个标记的话，带牌局刷新会被下面的恢复逻辑拉回 2.5D 页
+  const [view, setView] = useState<"landing" | "setup" | "rules" | "table3d">(() =>
+    new URLSearchParams(window.location.search).get("view") === "3d" ? "table3d" : "landing",
+  );
   /** 提示面板点的词：交给 Hand 铺好选牌，亮不亮玩家自己定 */
   const [hintPick, setHintPick] = useState<{ word: string; nonce: number } | null>(null);
   /**
@@ -525,8 +529,10 @@ export default function App() {
   // （测试脚本也靠它接管一局用 /api/dev/setup 摆好的牌。）
   const resume = g.resume;
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get("match");
-    if (id) {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("match");
+    // 3D 页自己拉 envelope（T2.1），不走 useGame——那是 T5.2 的事
+    if (id && params.get("view") !== "3d") {
       setConfig(DEFAULTS);
       resume(id);
     }
@@ -593,7 +599,14 @@ export default function App() {
     if (view === "table3d") {
       return (
         <Suspense fallback={<div className="table3d-page" />}>
-          <Table3D onBack={() => setView("landing")} />
+          <Table3D
+            onBack={() => {
+              // 3D 页往地址栏写了 ?match&view=3d，走的时候要擦掉——
+              // 不擦的话回首页刷新又会被弹回 3D 页
+              history.replaceState(null, "", window.location.pathname);
+              setView("landing");
+            }}
+          />
         </Suspense>
       );
     }
