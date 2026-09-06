@@ -8,9 +8,12 @@ import {
   MELD_ROWS,
   meldSlots,
   PLAYERS,
+  MELD_COLS,
+  WALL_LAYERS,
   WALL_SLOTS_TOTAL,
-  WALL_TILES,
-  WALL_TILES_PER_SEAT,
+  WALL_STACKS_OTHER,
+  WALL_STACKS_PLAYER,
+  wallStacks,
   WORLD_SIZE,
 } from "./layout";
 import { makeSlots } from "./setup-slots";
@@ -33,12 +36,16 @@ describe("槽位名", () => {
   it("全部唯一", () => {
     // makeSlots 内部已经在重名时抛错，这里再从数量上兜一层：
     // Map 的 size 必须等于「按公式算出来的总格数」，少一个就说明有覆盖
-    const perSeat =
+    // 牌墙四家不一样长（玩家侧 15 墩、别家 13 墩），所以逐家累加
+    const perSeatCommon =
       LOOSE_SLOTS +
       Array.from({ length: MELD_ROWS }, (_, i) => meldSlots(i)).reduce((a, b) => a + b, 0) +
-      DISCARD_ROWS * DISCARD_COLS +
-      WALL_SLOTS_TOTAL / PLAYERS;
-    expect(slots.size).toBe(perSeat * PLAYERS);
+      DISCARD_ROWS * DISCARD_COLS;
+    let want = 0;
+    for (let seat = 0; seat < PLAYERS; seat++) {
+      want += perSeatCommon + wallStacks(seat) * WALL_LAYERS;
+    }
+    expect(slots.size).toBe(want);
   });
 
   it("四家都有，且组名齐全", () => {
@@ -56,8 +63,12 @@ describe("座位旋转", () => {
     for (let seat = 1; seat < PLAYERS; seat++) {
       for (const [name, slot] of slots) {
         if (!name.endsWith(`@${seat}`)) continue;
-        const base = slots.get(name.replace(/@\d+$/, "@0"))!;
-        const expected = rotateAboutCenter(base.origin, seat);
+        // 牌墙是唯一的例外：玩家侧 15 墩、别家 13 墩，长度不同也就没有共同的原型。
+        // 别家三堵墙之间仍然是严格的旋转关系，拿座位 1 当基准比。
+        const baseSeat = slot.group === "wall" ? 1 : 0;
+        if (seat === baseSeat) continue;
+        const base = slots.get(name.replace(/@\d+$/, `@${baseSeat}`))!;
+        const expected = rotateAboutCenter(base.origin, seat - baseSeat);
         expect(slot.origin.x).toBeCloseTo(expected.x, 6);
         expect(slot.origin.y).toBeCloseTo(expected.y, 6);
         expect(slot.origin.z).toBeCloseTo(expected.z, 6);
@@ -192,18 +203,17 @@ describe("散牌区", () => {
 });
 
 describe("亮词区", () => {
-  it("行数 = max_melds() 的最大值 4，第 i 行 14-3i 格", () => {
+  it("7 列 × 4 行 —— 形状是被牌墙挤出来的，不是 §3.3 的 14/11/8/5", () => {
     expect(MELD_ROWS).toBe(4);
     for (let r = 0; r < MELD_ROWS; r++) {
       const inRow = [...slots.values()].filter(
         (s) => s.group === "meld" && s.seat === 0 && s.indexes[0] === r,
       );
-      expect(inRow.length, `第 ${r} 行`).toBe(meldSlots(r));
+      expect(inRow.length, `第 ${r} 行`).toBe(MELD_COLS);
     }
-    expect([0, 1, 2, 3].map(meldSlots)).toEqual([14, 11, 8, 5]);
   });
 
-  it("靠右生长，整体不出桌面", () => {
+  it("整体不出桌面", () => {
     for (const s of slots.values()) {
       if (s.group !== "meld" || s.seat !== 0) continue;
       const p = s.places[0];
@@ -222,6 +232,16 @@ describe("亮词区", () => {
 });
 
 describe("牌河", () => {
+  it("第 0 行贴着桌心，往外长——真牌桌就是这么打的", () => {
+    const rows = [0, 1, 2].map((r) => slots.get(`discard.${r}.0@0`)!.places[0].position.y);
+    // 行号越大离桌心越远
+    expect(rows[0]).toBeGreaterThan(rows[1]);
+    expect(rows[1]).toBeGreaterThan(rows[2]);
+    // 第 0 行的内侧边正好贴着中央空地
+    const inner = slots.get("discard.0.0@0")!.places[0];
+    expect(inner.position.y + inner.size.y / 2).toBeCloseTo((WORLD_SIZE - DISCARD_COLS * TILE.x) / 2);
+  });
+
   it("每家一片，3×9 = 27 格", () => {
     for (let seat = 0; seat < PLAYERS; seat++) {
       const mine = [...slots.values()].filter((s) => s.group === "discard" && s.seat === seat);
@@ -235,14 +255,24 @@ describe("牌河", () => {
 });
 
 describe("牌墙", () => {
-  it("摆得下开局的 56 张（108 - 4×13），每家 14 张", () => {
-    expect(WALL_TILES).toBe(108 - PLAYERS * 13);
-    expect(WALL_TILES_PER_SEAT).toBe(14);
+  it("槽位数正好是一副牌：15×2 + 13×2×3 = 108，零余量", () => {
+    expect(WALL_SLOTS_TOTAL).toBe(108);
     expect([...slots.values()].filter((s) => s.group === "wall").length).toBe(WALL_SLOTS_TOTAL);
-    expect(WALL_SLOTS_TOTAL).toBeGreaterThanOrEqual(WALL_TILES);
     for (let seat = 0; seat < PLAYERS; seat++) {
       const mine = [...slots.values()].filter((s) => s.group === "wall" && s.seat === seat);
-      expect(mine.length).toBeGreaterThanOrEqual(WALL_TILES_PER_SEAT);
+      expect(mine.length, `座位 ${seat}`).toBe(wallStacks(seat) * WALL_LAYERS);
+    }
+    // 半墩（1 张）不好看，四个半墩凑成的 2 墩塞进玩家那一侧
+    expect(WALL_STACKS_PLAYER - WALL_STACKS_OTHER).toBe(2);
+  });
+
+  it("每墩两层，上层正好压在下层上面", () => {
+    for (let stack = 0; stack < WALL_STACKS_PLAYER; stack++) {
+      const lower = slots.get(`wall.${stack}.0@0`)!;
+      const upper = slots.get(`wall.${stack}.1@0`)!;
+      expect(upper.origin.x).toBe(lower.origin.x);
+      expect(upper.origin.y).toBe(lower.origin.y);
+      expect(upper.origin.z - lower.origin.z).toBeCloseTo(TILE.z);
     }
   });
 
@@ -257,13 +287,19 @@ describe("牌墙", () => {
 });
 
 describe("四个区互不重叠", () => {
-  /** 两个格子的默认姿态在 xy 平面上是否相交（贴边不算） */
+  /**
+   * 两个格子的默认姿态是否相交（贴边不算）。
+   *
+   * **必须连 z 一起判**：牌墙一墩两层，两层在 xy 上完全重合，靠 z 分开——
+   * 只判 xy 的话每一墩都会被当成「自己压自己」。
+   */
   function overlaps(a: Slot, b: Slot): boolean {
     const pa = a.places[0];
     const pb = b.places[0];
     const dx = Math.abs(pa.position.x - pb.position.x) < (pa.size.x + pb.size.x) / 2 - EPSILON;
     const dy = Math.abs(pa.position.y - pb.position.y) < (pa.size.y + pb.size.y) / 2 - EPSILON;
-    return dx && dy;
+    const dz = Math.abs(pa.position.z - pb.position.z) < (pa.size.z + pb.size.z) / 2 - EPSILON;
+    return dx && dy && dz;
   }
 
   it("**四家之间**也不重叠——牌河要拼成风车，不能在桌心撞成一团", () => {
@@ -291,18 +327,11 @@ describe("四个区互不重叠", () => {
     }
   });
 
-  it("同一家的任意两格，包围盒在 xy 平面上不相交", () => {
+  it("同一家的任意两格，包围盒不相交（牌墙两层靠 z 分开）", () => {
     const mine = [...slots.values()].filter((s) => s.seat === 0);
-    // 只比默认朝向（places[0]）——那是牌实际停放的姿态
-    const boxes = mine.map((s) => ({ name: s.name, p: s.places[0] }));
-    const EPS = 1e-6;
-    for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        const a = boxes[i].p;
-        const b = boxes[j].p;
-        const overlapX = Math.abs(a.position.x - b.position.x) < (a.size.x + b.size.x) / 2 - EPS;
-        const overlapY = Math.abs(a.position.y - b.position.y) < (a.size.y + b.size.y) / 2 - EPS;
-        expect(overlapX && overlapY, `${boxes[i].name} 与 ${boxes[j].name} 重叠`).toBe(false);
+    for (let i = 0; i < mine.length; i++) {
+      for (let j = i + 1; j < mine.length; j++) {
+        expect(overlaps(mine[i], mine[j]), `${mine[i].name} 与 ${mine[j].name} 重叠`).toBe(false);
       }
     }
   });

@@ -15,8 +15,8 @@ import {
   MELD_ROWS,
   meldSlots,
   PLAYERS,
-  WALL_COLS,
-  WALL_ROWS,
+  WALL_LAYERS,
+  wallStacks,
 } from "./layout";
 import type { LooseSlots } from "./loose-reconcile";
 
@@ -115,21 +115,29 @@ export function orderByWord(tiles: string, word: string): Array<{ tile: string; 
   return out as Array<{ tile: string; wild?: string }>;
 }
 
-/** 一家的亮词区。亮词永远公开、永远正面、永远大写 */
+/**
+ * 一家的亮词区。亮词永远公开、永远正面、永远大写。
+ *
+ * 每行 `meldSlots()` 格（7），**一个词从新的一行起、放不下就折到下一行**——
+ * 亮词区被牌墙挤到只剩 7×4（见 layout.ts 的 MELD_COLS），而英语单词可以长到 13 个
+ * 字母，一词一行装不下。摆不下的整体丢弃（不画半个词），溢出是显示问题，
+ * 不影响任何规则。
+ */
 function layMelds(melds: readonly Word[], seat: number, out: Placement[]): void {
-  melds.forEach((meld, row) => {
-    if (row >= MELD_ROWS) return; // 超出布局能放的行数，交给 T2.1 处理
+  let row = 0;
+  for (const meld of melds) {
     const cells = orderByWord(meld.tiles, meld.word);
+    if (row + Math.ceil(cells.length / meldSlots(row)) > MELD_ROWS) return; // 摆不下了
     cells.forEach((cell, i) => {
-      if (i >= meldSlots(row)) return;
       out.push({
-        slotName: `meld.${row}.${i}@${seat}`,
+        slotName: `meld.${row + Math.floor(i / meldSlots(row))}.${i % meldSlots(row)}@${seat}`,
         typeIndex: faceOf(cell.tile, cell.wild, false),
         backVariant: 0,
         rotationIndex: ONLY,
       });
     });
-  });
+    row += Math.ceil(cells.length / meldSlots(row));
+  }
 }
 
 /**
@@ -209,20 +217,29 @@ export function layout(state: State, loose: LooseSlots, display: DisplayState): 
     });
   });
 
-  // ---- 牌墙：只表达还剩多少张，全部背面、不可交互 ----
+  // ---- 牌墙：一条全局的逆时针链，只表达还剩多少张 ----
   //
-  // **四家轮流分**，不是一家填满了再填下一家：需求文档 §3 要的是「四家各一段」，
-  // 按座位顺序铺的话开局就是 16/16/16/8，摸牌时还会整段整段地空掉一家——
-  // 看起来像谁的牌墙塌了。轮流分则四家同进同退（开局 14/14/14/14）。
-  const perWall = WALL_ROWS * WALL_COLS;
-  for (let k = 0; k < state.wallLeft && k < PLAYERS * perWall; k++) {
-    const seat = k % PLAYERS;
-    const n = Math.floor(k / PLAYERS);
-    // **按列铺，不按行铺**：14 张摆进 4×4 时总有 2 格空着，按行铺空的是最后一行，
-    // 整块牌墙就成了个缺口朝下的锯齿；按列铺空的是最后一列，看起来就是
-    // 「这堵墙从一头被摸掉了两张」——那正是它要表达的意思
+  // 发牌与摸牌**从玩家侧牌墙的最左端起，逆时针绕桌一圈**，一墩一墩地取
+  // （先上层后下层）。服务端只给 wallLeft，所以前端把这条链的**后 wallLeft 项**
+  // 画出来即可——前面那些已经被摸走了。
+  //
+  // 开局 52 张发出去，正好啃掉玩家侧那 30 张和下家的 22 张：玩家面前的墙一开局
+  // 就空了，与真牌桌一致。**这就是为什么不能各摸各的**——各家从自己面前摸的话，
+  // 四堵墙会同进同退地一起变矮，那不是麻将。
+  const chain: Array<{ seat: number; stack: number; layer: number }> = [];
+  for (let seat = 0; seat < PLAYERS; seat++) {
+    for (let stack = 0; stack < wallStacks(seat); stack++) {
+      // 一墩两张，先取上层（layer = WALL_LAYERS-1）再取下层
+      for (let layer = WALL_LAYERS - 1; layer >= 0; layer--) {
+        chain.push({ seat, stack, layer });
+      }
+    }
+  }
+  for (let k = chain.length - state.wallLeft; k < chain.length; k++) {
+    const at = chain[k];
+    if (!at) continue; // wallLeft 比整副牌还多，不可能，但不为它崩
     out.push({
-      slotName: `wall.${n % WALL_ROWS}.${Math.floor(n / WALL_ROWS)}@${seat}`,
+      slotName: `wall.${at.stack}.${at.layer}@${at.seat}`,
       typeIndex: UNKNOWN_FACE,
       backVariant: 0,
       rotationIndex: ONLY, // 牌墙的 rotations 只有 [FACE_DOWN]，0 就是背面

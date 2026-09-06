@@ -26,9 +26,8 @@ const BUDGET = 14;
 const MELD_COST = 3;
 /** `rules.MIN_WORD_LEN` 的**最小可选值**。服务端限制 2..5（api.py:107） */
 const MIN_WORD_LEN_FLOOR = 2;
-/** `rules.DECK_SIZE` / `rules.HAND_SIZE` / `rules.PLAYERS` */
+/** `rules.DECK_SIZE` / `rules.PLAYERS` */
 const DECK_SIZE = 108;
-const HAND_SIZE = 13;
 export const PLAYERS = 4;
 
 /**
@@ -50,41 +49,35 @@ export const LOOSE_SLOTS = DEALER_HAND_SIZE + 4; // 18
 export const LOOSE_CENTERED_ON = DEALER_HAND_SIZE; // 14
 
 /**
- * 亮词区的行数 = `rules.max_melds()` 的**最大可能值**。
+ * 亮词区：**7 列 × 4 行 = 28 格的一块，词按行摆、放不下就折行。**
  *
- * `max_melds() = (BUDGET - MIN_WORD_LEN) // MELD_COST`，是最短词长的推论。
- * 最短词长由玩家在设置页选（2/3/4，服务端放行到 5），最短词长越小能亮的词越多，
- * 所以布局要按最宽松的那档（2）来留：(14 - 2) // 3 = 4 行。
+ * ⚠️ **这块的形状是被牌墙挤出来的，不是从 rules.py 推出来的**，与需求文档 §3.3
+ * 「4 行 14/11/8/5」不符——那 38 格是按「亮词长度上限 = 亮它那一刻手上有几张牌」
+ * 算的理论上界，写它的时候桌面上还没有真正的牌墙。
+ *
+ * 摆上两层的牌墙（玩家侧 15 墩 = 90 长）之后，把四家的旋转副本一起算，
+ * 桌上**最大的合法空矩形只剩 28 格**（7 列 × 4 行，x 18..60 × y 18..54）——
+ * 一行 14 格 = 84 长的亮词行在 174 的桌面上根本站不下。
+ *
+ * 所以这版按 28 格摆，够 4 个 ≤7 字母的词；更长的词折行，占用下一行。
+ * 真要塞下理论上界的 38 格，得改桌面尺寸或亮词区的呈现方式（缩放/叠压），
+ * 那是布局层面的决定，不在 T2.1 里。
  */
 export const MELD_ROWS = Math.floor((BUDGET - MIN_WORD_LEN_FLOOR) / MELD_COST); // 4
+export const MELD_COLS = 7;
 
-/**
- * 第 i 个亮词最多能有多长（= 那一行要留几格）。
- *
- * 亮词的长度上限就是**亮它的那一刻手上有多少张牌**。手牌从 13 起，摸牌 +1、
- * 每亮一个词净 -3（`engine.py:366` 的 reveal：拿掉 L 张、补摸 L-3 张），
- * 所以已经亮了 i 个词时手牌上限是 `DEALER_HAND_SIZE - MELD_COST * i`。
- *
- * 吃牌那条路也一样：吃是「打完牌的 13 张 + 吃进来的 1 张」，同样是 14 - 3i。
- *
- * 实测（4 家 AI 自对弈，minWordLen 2-5 × minWinWordLen 0/5/6/7/8 各 150 局，
- * 共 3000 局）第 i 个亮词的最长词长为 13 / 10 / 8 / 5，逐项不超过这里算出的
- * 14 / 11 / 8 / 5，且 i=2、i=3 两档正好顶到上限——说明这个界是紧的，不是虚的。
- */
-export function meldSlots(row: number): number {
-  return DEALER_HAND_SIZE - MELD_COST * row; // 14, 11, 8, 5
+/** 第 i 行几格。现在每行一样长，签名留着是因为调用方按行取 */
+export function meldSlots(_row: number): number {
+  return MELD_COLS;
 }
 
-/** 亮词区一共几格（四行相加 = 38） */
-export const MELD_SLOTS_TOTAL = Array.from({ length: MELD_ROWS }, (_, i) => meldSlots(i)).reduce(
-  (a, b) => a + b,
-  0,
-);
+/** 亮词区一共几格（28）。**小于理论上界 38**，见上 */
+export const MELD_SLOTS_TOTAL = MELD_ROWS * MELD_COLS;
 
 /**
  * 每家牌河的槽位数：3 行 × 9 = 27。
  *
- * 理论上限没有意义——牌河总长受牌墙约束（见 WALL_SLOTS_TOTAL，56 张），
+ * 理论上限没有意义——牌河总长受牌墙约束（开局 108 − 4×13 = 56 张可摸），
  * 但四家分得不均，单家的理论上限接近全场总数，按那个留会摆出一片荒地。
  *
  * 所以按实测取：同一次 3000 局扫描里，单座位牌河的峰值是 **21 张**
@@ -95,27 +88,36 @@ export const DISCARD_ROWS = 3;
 export const DISCARD_COLS = 9;
 
 /**
- * 开局牌墙张数：`DECK_SIZE - PLAYERS * HAND_SIZE = 108 - 52 = 56`。
- * 四家分摊，每家身边要摆得下 14 张。
+ * 牌墙：**两层的墩，一条全局的逆时针链**，不是每家面前一个方块。
+ *
+ * 108 张分四个方向，每方向 27 张 = 13.5 墩。半墩（1 张）不好看，所以把四个半墩
+ * 凑成的 4 张变成 2 墩，塞进**玩家那一侧**：玩家侧 15 墩，其余三家各 13 墩。
+ *
+ *     15 * 2 + 13 * 2 * 3 = 108
+ *
+ * 槽位数**正好等于一副牌**，零余量——开局时整副牌都码在墙上，这是它该有的样子。
+ *
+ * （立直麻将是 136 张、每家 17 墩，所以 Autotable 的 `row(19), stack()` 抄不得，
+ * 只有「两层」和「一条线」这两点是共通的。）
  */
-export const WALL_TILES = DECK_SIZE - PLAYERS * HAND_SIZE; // 56
-export const WALL_TILES_PER_SEAT = WALL_TILES / PLAYERS; // 14
+export const WALL_LAYERS = 2;
+export const WALL_STACKS_PLAYER = 15;
+export const WALL_STACKS_OTHER = 13;
+export const WALL_SLOTS_TOTAL =
+  (WALL_STACKS_PLAYER + WALL_STACKS_OTHER * (PLAYERS - 1)) * WALL_LAYERS; // 108
 
 /**
- * 牌墙的格子摆成 4 列 × 4 行 = 16 格，比要摆的 14 张多 2 格。
+ * 发牌与摸牌的顺序：**从玩家侧牌墙的最左端起，逆时针绕桌一圈**，
+ * 一墩一墩地取（先上层后下层）。座位号每 +1 就是逆时针转 90°，所以座位顺序
+ * 就是 0 → 1 → 2 → 3。
  *
- * 形状由**它待的那块地方**决定。需求文档 §3.1 要牌墙夹在散牌区与牌河之间
- * （照 Autotable：hand y=0 / wall y=20 / discard y=60），而 0 号座位在那条带子上
- * 只剩 `x 45..81 × y 9..33` 这一块 36×24 的空地：左边 x 9..45 是**下家亮词区**
- * 转过来的阶梯，右边 x 81 起是自家亮词区第 0 行，上边 y 33 起是自家牌河。
- *
- * 36×24 塞不下 3 行竖放的牌（要 27 高），竖放只放得下 6×2 = 12 格，不够 14 张。
- * 所以牌墙的牌**侧躺**（绕 z 转 90°，占地 9×6），4 列 × 4 行正好填满 36×24。
- * 多出的 2 格空着——牌墙不可交互（需求文档 §9 Q6），只是「还剩多少张」的视觉表达。
+ * 这条链是**渲染唯一需要的东西**：服务端只给 `wallLeft`（还剩几张），
+ * 前端把这条链的**后 wallLeft 项**画出来即可。开局 52 张发出去，正好啃掉
+ * 玩家侧那 30 张和下家的 22 张——玩家面前的墙一开局就空了，与真牌桌一致。
  */
-export const WALL_ROWS = 4;
-export const WALL_COLS = 4;
-export const WALL_SLOTS_TOTAL = PLAYERS * WALL_ROWS * WALL_COLS; // 64
+export function wallStacks(seat: number): number {
+  return seat === 0 ? WALL_STACKS_PLAYER : WALL_STACKS_OTHER;
+}
 
 /**
  * 渲染实例池的大小 = `rules.DECK_SIZE`。

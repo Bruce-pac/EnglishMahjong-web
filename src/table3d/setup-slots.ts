@@ -1,14 +1,14 @@
-import { Euler, Quaternion, Vector2, Vector3 } from "three";
+import { Euler, Quaternion, Vector3 } from "three";
 import {
   DISCARD_COLS,
   DISCARD_ROWS,
   LOOSE_CENTERED_ON,
   LOOSE_SLOTS,
+  MELD_COLS,
   MELD_ROWS,
-  meldSlots,
-  PLAYERS,
-  WALL_COLS,
-  WALL_ROWS,
+  WALL_LAYERS,
+  WALL_STACKS_OTHER,
+  WALL_STACKS_PLAYER,
   WORLD_SIZE,
 } from "./layout";
 import { Slot } from "./slot";
@@ -20,43 +20,36 @@ import { Size, ThingType } from "./types";
  * 只为 **0 号座位**（屏幕下方，面朝 +y）定义一次，其余三家绕桌心转 90°/180°/270°
  * 复制出来。坐标系：桌面 0..174 见方，z 向上，牌面朝 +z。
  *
- * 0 号座位从桌沿往桌心排开：
+ * 0 号座位从桌沿往桌心排开（次序照真牌桌与 Autotable：手牌 → 牌墙 → 牌河 → 桌心）：
  *
  * ```
  *   y  0.. 9   loose    散牌区，一整排 18 格，x 45..153（按满手 14 张居中，余量在右）
- *   y  9..33   wall     牌墙 4x4 侧躺，x 45..81（夹在散牌区与牌河之间，§3.1）
- *   y  9..45   meld     亮词区 4 行，由 x=165 往左生长（离桌沿留 9），x 81..165
- *   y 33..60   discard  牌河 3x9，x 居中 60..114
- *   x/y 60..114         中央 54x54 空地，留给记分盘（D12，T2.2）
+ *   y  9..18   wall     牌墙，**两层的墩**，玩家侧 15 墩 x 42..132（别家 13 墩）
+ *   y 18..54   meld     亮词区 7 列 × 4 行，x 18..60（形状是被牌墙挤出来的，见下）
+ *   y 33..60   discard  牌河 3×9，x 60..114，**第 0 行贴着桌心**往外长
+ *   x/y 60..114         中央 54×54 空地，留给记分盘（D12，T2.2）
  * ```
  *
- * **四家的牌河要拼成风车而不是撞在一起。** 关键是牌河那一块必须「x 方向居中，
- * 且内侧边正好切在中央空地的边上」：块宽 9×6 = 54，中央空地就得是 54×54，
- * 内侧边落在 87 − 27 = 60。这样转 90° 之后，隔壁那家的块只会与自己**贴边**，
- * 不会咬进来（Autotable 的牌河也是这么摆的，只是它的块是 36 宽）。
+ * **两条不能破的几何约束**（需求文档 §3.2）：
  *
- * 亮词区靠右、牌墙靠左，都与居中的牌河在 x 上错开：亮词区是个阶梯（第 0 行才到
- * x=81，往上逐行缩到 x ≥ 135），牌墙就填在它左下方 x 45..81 那块 36×24 的空地里，
- * 两者只贴边不重叠；牌河在 y 上又比它们都靠里，三者互不相犯。
+ * ① 牌河宽度必须等于中央空地边长：9×6 = 54，内侧边落在 (174−54)/2 = 60。
+ *    差一点，转 90° 之后隔壁那家的牌河就会咬进来，四片在桌心撞成一团。
+ * ② 任何区都不能贴着桌沿：贴着 x=174 的话，转 90° 之后它就贴着隔壁那家的 y=0，
+ *    正好压在人家的散牌区上。
  *
- * **判断「哪儿是空的」必须连四家的旋转副本一起算。** x 33..45 看着空，其实是下家
- * 亮词区转过来占着的——牌墙的左边界只能到 45。
- *
- * 槽位**数量**全部来自 `layout.ts`（可追溯到 `sim/rules.py`）；槽位**位置**是纯视觉
- * 选择，T1.3 / T2.1 摆上真牌之后还会再调——但上面那条「牌河宽度 = 中央空地边长」
- * 的约束不能破，破了四家牌河就会重叠。
+ * **判断「哪儿是空的」必须连四家的旋转副本一起算。** 眼睛看着空的地方，很可能是
+ * 下家的某个区转过来占着的——亮词区被挤到 x 18..60 就是这么定下来的。
  */
 
 const Rotation = {
   FACE_UP: new Quaternion().setFromEuler(new Euler(0, 0, 0)),
   FACE_DOWN: new Quaternion().setFromEuler(new Euler(Math.PI, 0, 0)),
-  /** 背面朝上、且**侧躺**（长边沿 x），占地 9×6。牌墙用，见 START.wall */
-  FACE_DOWN_SIDEWAYS: new Quaternion().setFromEuler(new Euler(Math.PI, 0, Math.PI / 2)),
 };
 
 /** 一排/一列的步长就是牌的尺寸——格子紧挨着，不留缝 */
 const DX = Size[ThingType.TILE].x; // 6
 const DY = Size[ThingType.TILE].y; // 9
+const DZ = Size[ThingType.TILE].z; // 4
 
 type SlotOp = (slots: Array<Slot>) => Array<Slot>;
 
@@ -103,31 +96,20 @@ function column(count: number, dy: number = DY): SlotOp {
 }
 
 /**
- * 亮词区每行长度不同（第 i 行 `meldSlots(i)` 格），`row()` 那种「每行一样长」的
- * 复制表达不了，所以单独一个算子：先 column 出 4 行，再逐行按各自的长度铺开。
+ * 一墩两层：同一处往上叠一张。
+ *
+ * 牌墙是**码起来的**，不是平铺的——真牌桌上每墩两张，摸牌时先取上面那张。
+ * 我们的牌墙不可交互，所以不需要 Autotable 那套 `up`/`down` 链，位置对就够了。
  */
-function meldRows(): SlotOp {
-  return (slots) => {
-    const result: Array<Slot> = [];
-    for (const slot of slots) {
-      const rowIndex = slot.indexes[slot.indexes.length - 1];
-      for (let i = 0; i < meldSlots(rowIndex); i++) {
-        const copied = slot.copy(`.${i}`);
-        // direction 是 (-1, 1)，牌往 -x 长；origin 也要跟着往 -x 走
-        copied.origin = copied.origin.clone().add(new Vector3(-DX * i, 0, 0));
-        copied.indexes.push(i);
-        result.push(copied);
-      }
-    }
-    return result;
-  };
+function stack(): SlotOp {
+  return repeat(WALL_LAYERS, new Vector3(0, 0, DZ));
 }
 
-/** 把整套格子复制到四家，各自绕桌心旋转 */
-function seats(): SlotOp {
+/** 把整套格子复制到指定座位（默认四家），各自绕桌心旋转 */
+function seats(which: number[] = [0, 1, 2, 3]): SlotOp {
   return (slots) => {
     const result: Array<Slot> = [];
-    for (let seat = 0; seat < PLAYERS; seat++) {
+    for (const seat of which) {
       for (const slot of slots) {
         const copied = slot.copy(`@${seat}`);
         copied.rotate(seat, WORLD_SIZE);
@@ -143,34 +125,32 @@ function centeredX(count: number): number {
   return (WORLD_SIZE - count * DX) / 2;
 }
 
-/**
- * 中央空地的边长 = 牌河的宽度。见文件头注释：这两个数必须相等，
- * 四家的牌河才能拼成风车而不是在桌心撞成一团。
- */
+/** 中央空地的边长 = 牌河的宽度。见文件头约束 ① */
 const CENTER_HOLE = DISCARD_COLS * DX; // 54
-/**
- * 亮词区离桌沿留出的距离。
- *
- * 亮词区贴着桌沿（x = 174）的话，转 90° 之后它就贴着隔壁那家的桌沿（y = 0），
- * 正好压在人家的散牌区上。留出一个牌高（9）就错开了。
- */
-const MELD_EDGE_INSET = DY; // 9
 /** 牌河内侧边（也就是中央空地的近侧边）的 y */
 const CENTER_HOLE_EDGE = (WORLD_SIZE - CENTER_HOLE) / 2; // 60
+
+/** 牌墙那条带子的近侧边：紧贴散牌区背后 */
+const WALL_Y = DY; // 9
+/** 亮词区的近侧边：紧贴牌墙背后 */
+const MELD_Y = WALL_Y + DY; // 18
+/** 亮词区的左边界。再往左是下家亮词区转过来的地盘 */
+const MELD_X = 3 * DX; // 18
 
 const START = {
   /**
    * 散牌区。自己的正面朝上，别家渲染背面——所以两种朝向都要有，
-   * `rotationIndex` 0=正面 1=背面（T2.1 按 envelope 决定用哪个）。
+   * `rotationIndex` 0=正面 1=背面。
    *
    * **暗词不是独立的区**（需求文档 §3）：它就住在这一排里，只是被标记成一组，
-   * 于是「组完暗词还能整体挪位置」直接复用这排的排列逻辑，不需要额外机制。
+   * 于是「组完暗词还能整体挪位置」直接复用这排的排列逻辑。
+   *
+   * 按**满手 14 张**居中，余下的 4 格腾挪余量挂在右边：居中的该是牌，不是空格子。
    */
   loose: () =>
     new Slot({
       name: "loose",
       group: "loose",
-      // 按满手 14 张居中，余下的 4 格腾挪余量落在右边：居中的该是牌，不是空格子
       origin: new Vector3(centeredX(LOOSE_CENTERED_ON), 0, 0),
       rotations: [Rotation.FACE_UP, Rotation.FACE_DOWN],
       canFlipMultiple: true,
@@ -182,49 +162,50 @@ const START = {
    * 亮词区。亮词是公开信息（连别家的 `melds` 都给真实字母，需求文档 §10 第 7 条），
    * 所以只有正面朝上一种朝向。永久冻结不可拖动，也就不需要 shift 链。
    *
-   * `direction = (-1, 1)` 让牌从右往左长——0 号座位的亮词区在右下角（§3）。
+   * **位置和形状都是被牌墙挤出来的。** 摆上两层的牌墙之后，把四家旋转副本一起算，
+   * 桌上最大的合法空矩形就只剩这块 7 列 × 4 行（x 18..60 × y 18..54）。
+   * 需求文档 §3 说亮词区在「右下角」、§3.3 说 4 行 14/11/8/5——那是牌墙还没摆上桌
+   * 时推的，一行 14 格 = 84 长，站不下。见 layout.ts 的 MELD_COLS 注释。
    */
   meld: () =>
     new Slot({
       name: "meld",
       group: "meld",
-      origin: new Vector3(WORLD_SIZE - MELD_EDGE_INSET, 9, 0),
-      direction: new Vector2(-1, 1),
+      origin: new Vector3(MELD_X, MELD_Y, 0),
       rotations: [Rotation.FACE_UP],
     }),
 
   /**
    * 牌河。每家身前一片（§3.4，T0.4 已让服务端下发 `discardSeats`）。
    * 打出去的牌一律正面朝上。自己那片要能接收拖入（§4.7），所以画影子。
+   *
+   * **第 0 行贴着桌心，往外长**（`column(3, -DY)`，与 Autotable 同）——真牌桌就是
+   * 这么打的：牌先落在离桌心最近的那行，摆满了才往自己身前退。反过来摆的话，
+   * 牌河会从身前往桌心长，看着像在往中间挤。
    */
   discard: () =>
     new Slot({
       name: "discard",
       group: "discard",
-      origin: new Vector3(centeredX(DISCARD_COLS), CENTER_HOLE_EDGE - DISCARD_ROWS * DY, 0),
+      origin: new Vector3(centeredX(DISCARD_COLS), CENTER_HOLE_EDGE - DY, 0),
       rotations: [Rotation.FACE_UP],
       drawShadow: true,
     }),
 
   /**
-   * 牌墙。**不可交互**（§9 Q6），只用来表达「还剩多少张」，所以只有背面一种朝向，
+   * 牌墙。**不可交互**（§9 Q6），只表达「还剩多少张」，所以只有背面一种朝向，
    * 不画影子、不接收拖放。
    *
-   * 位置照需求文档 §3.1：**夹在散牌区与牌河之间**，与真牌桌一致（Autotable 的
-   * 0 号座位是 hand y=0 / wall y=20 / discard y=60）。T1.1 把它摆在右侧角落
-   * `x 141..165`，并说「只剩这一个空盒子」——次序不对，那句话也不准确。
-   *
-   * 那条带子上真正空着的是 `x 45..81 × y 9..33`（左边是下家亮词区转过来的阶梯，
-   * 右边是自家亮词区第 0 行，上边是自家牌河）。**36×24 竖着只放得下 12 格**，
-   * 不够 14 张，所以牌侧躺：占地 9×6，4 列 × 4 行正好填满。
-   * 列距因此是 DY、行距是 DX——与其余三个区正好相反，见 makeSlots。
+   * 一条横在散牌区与牌河之间的带子，**每墩两层**。玩家那侧 15 墩、其余三家各 13 墩
+   * （layout.ts：108 = 15×2 + 13×2×3，槽位零余量）。两种长度各自居中，
+   * 所以要建两次、分别 `seats([0])` 与 `seats([1,2,3])`。
    */
-  wall: () =>
+  wall: (stacks: number) =>
     new Slot({
       name: "wall",
       group: "wall",
-      origin: new Vector3(45, DY, 0),
-      rotations: [Rotation.FACE_DOWN_SIDEWAYS],
+      origin: new Vector3(centeredX(stacks), WALL_Y, 0),
+      rotations: [Rotation.FACE_DOWN],
     }),
 };
 
@@ -232,10 +213,12 @@ const START = {
 export function makeSlots(): Map<string, Slot> {
   const groups: Array<Array<SlotOp>> = [
     [start(START.loose()), row(LOOSE_SLOTS, DX, { shift: true }), seats()],
-    [start(START.meld()), column(MELD_ROWS), meldRows(), seats()],
-    [start(START.discard()), column(DISCARD_ROWS), row(DISCARD_COLS), seats()],
-    // 牌墙的牌侧躺，占地 9×6：行距是牌宽 DX、列距是牌高 DY，与其余三个区相反
-    [start(START.wall()), column(WALL_ROWS, DX), row(WALL_COLS, DY), seats()],
+    [start(START.meld()), column(MELD_ROWS), row(MELD_COLS), seats()],
+    // 牌河：先按 −DY 往外铺 3 行（第 0 行贴桌心），每行再往 +x 铺 9 格
+    [start(START.discard()), column(DISCARD_ROWS, -DY), row(DISCARD_COLS), seats()],
+    // 牌墙：玩家侧 15 墩、别家各 13 墩，每墩两层。名字是 wall.<第几墩>.<第几层>
+    [start(START.wall(WALL_STACKS_PLAYER)), row(WALL_STACKS_PLAYER), stack(), seats([0])],
+    [start(START.wall(WALL_STACKS_OTHER)), row(WALL_STACKS_OTHER), stack(), seats([1, 2, 3])],
   ];
 
   const slots = new Map<string, Slot>();
