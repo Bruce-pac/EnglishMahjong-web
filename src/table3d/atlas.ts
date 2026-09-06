@@ -51,7 +51,7 @@ export const WILD_CONSONANT = 53;
 
 /**
  * 普通字母牌的牌面编号。
- * `letter` 传 a-z 或 A-Z，`lower` 决定用大写段还是小写段（纯显示，见 §4.5）。
+ * `letter` 传 a-z 或 A-Z，`lower` 决定用大写段还是小写段（纯显示，见需求文档 §4.9）。
  */
 export function letterFace(letter: string, lower = false): number {
   const i = ALPHABET.indexOf(letter.toLowerCase());
