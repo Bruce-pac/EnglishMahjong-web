@@ -218,8 +218,11 @@ export function layout(state: State, loose: LooseSlots, display: DisplayState): 
   for (let k = 0; k < state.wallLeft && k < PLAYERS * perWall; k++) {
     const seat = k % PLAYERS;
     const n = Math.floor(k / PLAYERS);
+    // **按列铺，不按行铺**：14 张摆进 4×4 时总有 2 格空着，按行铺空的是最后一行，
+    // 整块牌墙就成了个缺口朝下的锯齿；按列铺空的是最后一列，看起来就是
+    // 「这堵墙从一头被摸掉了两张」——那正是它要表达的意思
     out.push({
-      slotName: `wall.${Math.floor(n / WALL_COLS)}.${n % WALL_COLS}@${seat}`,
+      slotName: `wall.${n % WALL_ROWS}.${Math.floor(n / WALL_ROWS)}@${seat}`,
       typeIndex: UNKNOWN_FACE,
       backVariant: 0,
       rotationIndex: ONLY, // 牌墙的 rotations 只有 [FACE_DOWN]，0 就是背面

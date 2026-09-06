@@ -2,6 +2,7 @@ import { Euler, Quaternion, Vector2, Vector3 } from "three";
 import {
   DISCARD_COLS,
   DISCARD_ROWS,
+  LOOSE_CENTERED_ON,
   LOOSE_SLOTS,
   MELD_ROWS,
   meldSlots,
@@ -22,7 +23,7 @@ import { Size, ThingType } from "./types";
  * 0 号座位从桌沿往桌心排开：
  *
  * ```
- *   y  0.. 9   loose    散牌区，一整排 18 格，x 居中 33..141
+ *   y  0.. 9   loose    散牌区，一整排 18 格，x 45..153（按满手 14 张居中，余量在右）
  *   y  9..33   wall     牌墙 4x4 侧躺，x 45..81（夹在散牌区与牌河之间，§3.1）
  *   y  9..45   meld     亮词区 4 行，由 x=165 往左生长（离桌沿留 9），x 81..165
  *   y 33..60   discard  牌河 3x9，x 居中 60..114
@@ -169,7 +170,8 @@ const START = {
     new Slot({
       name: "loose",
       group: "loose",
-      origin: new Vector3(centeredX(LOOSE_SLOTS), 0, 0),
+      // 按满手 14 张居中，余下的 4 格腾挪余量落在右边：居中的该是牌，不是空格子
+      origin: new Vector3(centeredX(LOOSE_CENTERED_ON), 0, 0),
       rotations: [Rotation.FACE_UP, Rotation.FACE_DOWN],
       canFlipMultiple: true,
       drawShadow: true,

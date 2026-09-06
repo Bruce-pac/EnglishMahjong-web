@@ -42,6 +42,14 @@ export const PLAYERS = 4;
 export const LOOSE_SLOTS = DEALER_HAND_SIZE + 4; // 18
 
 /**
+ * 散牌区这一排**按满手 14 张居中**，多出来的 4 格腾挪余量挂在右边（见 setup-slots）。
+ *
+ * 整排 18 格居中的话，手牌从第 0 格左对齐排起，画面上永远偏左两格——
+ * 满手的时候尤其明显。居中的应该是**牌**，不是那排空格子。
+ */
+export const LOOSE_CENTERED_ON = DEALER_HAND_SIZE; // 14
+
+/**
  * 亮词区的行数 = `rules.max_melds()` 的**最大可能值**。
  *
  * `max_melds() = (BUDGET - MIN_WORD_LEN) // MELD_COST`，是最短词长的推论。
