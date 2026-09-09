@@ -24,8 +24,19 @@ export interface Render {
   bottom: boolean;
 }
 
-/** 静态槽位影子的上限。四家 loose+meld+discard 加起来远不到这个数 */
-const MAX_SHADOWS = 300;
+/**
+ * 静态槽位影子的上限。四家加起来实际用到：
+ *
+ * ```
+ *   散牌区 18×4 = 72   亮词区 38×4 = 152
+ *   牌河   28×4 = 112  牌墙   (15+13×3) = 54   （一墩只画下层）
+ *   合计 390
+ * ```
+ *
+ * 留到 512。改布局常量把总数顶上去时，`replaceShadows()` 会当场告警——
+ * 不然只会「有些格子没影子」，看着像随机漏画。
+ */
+const MAX_SHADOWS = 512;
 
 /**
  * 场景里「牌 + 影子」这一层。
@@ -99,6 +110,9 @@ export class ObjectView {
 
   /** 铺静态槽位影子。槽位不变就只在开局调一次 */
   replaceShadows(places: Array<Place>): void {
+    if (places.length > MAX_SHADOWS) {
+      console.warn(`槽位影子超过上限：${places.length} > ${MAX_SHADOWS}，多的不画`);
+    }
     const dummy = new Object3D();
     this.shadowObject.count = 0;
     for (const place of places) {

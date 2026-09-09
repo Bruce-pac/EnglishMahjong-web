@@ -322,13 +322,32 @@ describe("牌墙", () => {
     }
   });
 
-  it("不可交互：只有背面一种朝向，不画影子", () => {
+  it("不可交互：只有背面一种朝向，不接拖放", () => {
     for (const s of slots.values()) {
       if (s.group !== "wall") continue;
       expect(s.rotations.length).toBe(1);
-      expect(s.drawShadow).toBe(false);
       expect(s.rotateHeld).toBe(false);
     }
+  });
+
+  it("影子只画下层——一墩两层在 xy 上完全重合，画两块会加倍变黑", () => {
+    for (const s of slots.values()) {
+      if (s.group !== "wall") continue;
+      const layer = s.indexes[s.indexes.length - 1];
+      expect(s.drawShadow, s.name).toBe(layer === 0);
+    }
+  });
+});
+
+describe("槽位影子", () => {
+  it("四个区都画影子，且总数没顶到 ObjectView 的上限", () => {
+    const withShadow = [...slots.values()].filter((s) => s.drawShadow);
+    for (const group of ["loose", "meld", "discard", "wall"]) {
+      expect(withShadow.some((s) => s.group === group), group).toBe(true);
+    }
+    // object-view.ts 的 MAX_SHADOWS 是 512，算式写在那儿
+    expect(withShadow.length).toBe(72 + 152 + 112 + 54);
+    expect(withShadow.length).toBeLessThanOrEqual(512);
   });
 });
 

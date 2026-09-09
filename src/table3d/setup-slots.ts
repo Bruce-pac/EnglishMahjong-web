@@ -112,7 +112,15 @@ function column(count: number, dy: number = DY): SlotOp {
  * 我们的牌墙不可交互，所以不需要 Autotable 那套 `up`/`down` 链，位置对就够了。
  */
 function stack(): SlotOp {
-  return repeat(WALL_LAYERS, new Vector3(0, 0, DZ));
+  return (slots) => {
+    const out = repeat(WALL_LAYERS, new Vector3(0, 0, DZ))(slots);
+    // **只给最下面那层画影子**：一墩两层在 xy 上完全重合，影子又一律拍在 z≈0 的桌面上，
+    // 两块叠在一起会加倍变黑，还会自己跟自己 z-fighting
+    for (const slot of out) {
+      if (slot.indexes[slot.indexes.length - 1] > 0) slot.drawShadow = false;
+    }
+    return out;
+  };
 }
 
 /**
@@ -239,6 +247,8 @@ const START = {
       group: "meld",
       origin: new Vector3(MELD_RIGHT, MELD_Y, 0),
       rotations: [Rotation.FACE_UP],
+      // 亮词区不接收拖放（亮词永久冻结），画影子纯粹是为了让人看清这块地在哪儿
+      drawShadow: true,
     }),
 
   /**
@@ -272,6 +282,8 @@ const START = {
       group: "wall",
       origin: new Vector3(centeredX(stacks), WALL_Y, 0),
       rotations: [Rotation.FACE_DOWN],
+      // 牌墙不可交互，画影子同样只为看清地皮；上层那张由 stack() 关掉，见那里
+      drawShadow: true,
     }),
 };
 
