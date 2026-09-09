@@ -49,9 +49,13 @@ export interface DisplayState {
   lowercase: boolean;
 }
 
-/** 散牌区里正面朝上 / 背面朝上的 rotationIndex */
+/** 散牌区的两种朝向：0 = 平放正面朝上，1 = 立着（牌面朝那一家自己） */
 const LOOSE_FACE_UP = 0;
-const LOOSE_FACE_DOWN = 1;
+/**
+ * 别家没亮出来的手牌**立在自己面前**，牌面朝他本人、牌背朝桌心——
+ * 真牌桌就是这样，我们只看得见背面。平着扣在桌上的是打出去的牌，不是手牌。
+ */
+const LOOSE_STANDING = 1;
 /** meld / discard 只有一种朝向；wall 的唯一一种朝向就是背面 */
 const ONLY = 0;
 
@@ -192,7 +196,7 @@ export function layout(state: State, loose: LooseSlots, display: DisplayState): 
         slotName: `loose.${i}@${other.seat}`,
         typeIndex: UNKNOWN_FACE,
         backVariant: 0,
-        rotationIndex: LOOSE_FACE_DOWN,
+        rotationIndex: LOOSE_STANDING,
       });
     }
   }

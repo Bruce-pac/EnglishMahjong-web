@@ -156,6 +156,19 @@ describe("makePlace 的包围盒", () => {
 });
 
 describe("散牌区", () => {
+  it("两种朝向：自己平放正面朝上，别家立着（牌面朝他自己）", () => {
+    const slot = slots.get("loose.0@0")!;
+    expect(slot.rotations.length).toBe(2);
+    // 平放：包围盒就是牌本身 6×9×4
+    expect(slot.places[0].size.y).toBeCloseTo(TILE.y);
+    expect(slot.places[0].size.z).toBeCloseTo(TILE.z);
+    // 立着：y 与 z 互换，占地变浅、变高
+    expect(slot.places[1].size.y).toBeCloseTo(TILE.z);
+    expect(slot.places[1].size.z).toBeCloseTo(TILE.y);
+    // 立着的牌坐在桌面上，不悬空、不陷进桌子
+    expect(slot.places[1].position.z).toBeCloseTo(TILE.y / 2);
+  });
+
   const loose0 = [...slots.values()]
     .filter((s) => s.group === "loose" && s.seat === 0)
     .sort((a, b) => a.indexes[0] - b.indexes[0]);
@@ -213,15 +226,17 @@ describe("亮词区", () => {
     expect([0, 1, 2, 3].map(meldSlots)).toEqual([14, 11, 8, 5]);
   });
 
-  it("右对齐生长，最长那行居中，整体不出桌面", () => {
+  it("右对齐、在右手边，且离桌沿留出一个牌高", () => {
     const rowStart = (r: number) => slots.get(`meld.${r}.0@0`)!.places[0];
     // 四行的右边齐平
     for (let r = 1; r < MELD_ROWS; r++) {
       expect(rowStart(r).position.x).toBeCloseTo(rowStart(0).position.x);
     }
-    // 最长那行（14 格）居中
-    const last = slots.get(`meld.0.${meldSlots(0) - 1}@0`)!.places[0];
-    expect((rowStart(0).position.x + last.position.x) / 2).toBeCloseTo(WORLD_SIZE / 2);
+    // 在桌子的右半边（需求文档 §3：亮词区在右下角）
+    expect(rowStart(0).position.x).toBeGreaterThan(WORLD_SIZE / 2);
+    // §3.2 约束 ②：贴着桌沿的话，转 90° 之后会压在下家的散牌区上
+    const right = rowStart(0).position.x + rowStart(0).size.x / 2;
+    expect(WORLD_SIZE - right).toBeGreaterThanOrEqual(TILE.y);
 
     for (const s of slots.values()) {
       if (s.group !== "meld" || s.seat !== 0) continue;
@@ -265,6 +280,13 @@ describe("牌河", () => {
 });
 
 describe("牌墙", () => {
+  it("与手牌之间留出空当——贴在一起就不是牌桌了", () => {
+    const hand = slots.get("loose.0@0")!.places[0];
+    const wall = slots.get("wall.0.0@0")!.places[0];
+    const gap = wall.position.y - wall.size.y / 2 - (hand.position.y + hand.size.y / 2);
+    expect(gap).toBeGreaterThanOrEqual(TILE.y); // 至少一个牌高
+  });
+
   it("槽位数正好是一副牌：15×2 + 13×2×3 = 108，零余量", () => {
     expect(WALL_SLOTS_TOTAL).toBe(108);
     expect([...slots.values()].filter((s) => s.group === "wall").length).toBe(WALL_SLOTS_TOTAL);
