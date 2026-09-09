@@ -56,7 +56,7 @@ describe("A 层：散牌区对账", () => {
     expect(thirteen.slots.findIndex((e) => e !== null)).toBe(2);
   });
 
-  it("摸到的牌摆在手牌右端，不跳到左边那两格空位上", () => {
+  it("摸到的牌一律从右端加", () => {
     // 居中铺开之后左边空着两格。若按「第一个空格」摆，摸的牌会跳到最左边，
     // 和整手牌之间隔着个洞，看着像掉了一张
     const a = rebuildLoose(me(["c", "a", "t"]), 1);
@@ -64,6 +64,28 @@ describe("A 层：散牌区对账", () => {
     const b = reconcileLoose(me(["c", "a", "t", "s"]), a.slots, a.nextTileId);
     expect(b.slots[at + 3]?.tile).toBe("s");
     expect(b.slots.slice(0, at).every((e) => e === null)).toBe(true);
+  });
+
+  it("右端满了就整体左移腾位置——顺序和空隙都跟着走，不压实", () => {
+    // 把牌铺到最右一格：[· … · C A · T]，右端一格不剩
+    let a = rebuildLoose(me(["c", "a", "t"]), 1);
+    let s = moveLoose(a.slots, initialOffset(3) + 0, LOOSE_SLOTS - 4);
+    s = moveLoose(s, initialOffset(3) + 1, LOOSE_SLOTS - 3);
+    s = moveLoose(s, initialOffset(3) + 2, LOOSE_SLOTS - 1); // T 和 A 之间留一个洞
+    const before = slotOf(s);
+    expect(s[LOOSE_SLOTS - 1]).not.toBeNull();
+
+    const b = reconcileLoose(me(["c", "a", "t", "s"]), s, a.nextTileId);
+
+    // 新牌在最右端
+    expect(b.slots[LOOSE_SLOTS - 1]?.tile).toBe("s");
+    // 幸存的三张整体左移了同一个量（= 1），中间那个洞原样跟着走
+    const deltas = new Set<number>();
+    for (const [tileId, at] of slotOf(b.slots)) {
+      if (before.has(tileId)) deltas.add(at - before.get(tileId)!);
+    }
+    expect([...deltas]).toEqual([-1]);
+    expect(b.slots[LOOSE_SLOTS - 3]).toBeNull(); // 洞还在，没被压实
   });
 
   it("留下来的牌一格都不动", () => {
@@ -272,11 +294,19 @@ describe("fixture 回放：注入本地操作的完整序列", () => {
         r = reconcileLoose(state.me, withLocal, r.nextTileId);
 
         if (!r.rebuilt) {
-          // 不变式 3：两帧都在、且不在 consumedTileIds 里的牌，槽位逐一不变
+          // 不变式 3（修订）：两帧都在、且不在 consumedTileIds 里的牌，**要么原地不动，
+          // 要么整体平移同一个量**——右端放不下新牌时，整块牌会左移腾位置。
+          //
+          // 「同一个量」是这条仍然有牙齿的关键：只要有任何一张牌相对别人动了，
+          // deltas 就会多出一个值。乱序、压实、局部挪动全都会被这条抓住，
+          // 唯独放过刚性平移。平移量还必须 ≤ 0：只会往左让，不会凭空右移。
+          const deltas = new Set<number>();
           for (const [tileId, at] of slotOf(r.slots)) {
-            if (before.has(tileId)) {
-              expect(at, `第 ${step} 步 tileId ${tileId} 被挪了`).toBe(before.get(tileId));
-            }
+            if (before.has(tileId)) deltas.add(at - before.get(tileId)!);
+          }
+          expect(deltas.size, `第 ${step} 步：幸存的牌不是整体平移`).toBeLessThanOrEqual(1);
+          for (const d of deltas) {
+            expect(d, `第 ${step} 步：整体右移了 ${d}`).toBeLessThanOrEqual(0);
           }
           // 不变式 4：白搭声明跟着 tileId
           for (const [tileId, letter] of wildOf(r.slots)) {

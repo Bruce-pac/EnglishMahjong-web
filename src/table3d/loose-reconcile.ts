@@ -130,20 +130,50 @@ export function rebuildLoose(me: ReconcileMe, nextTileId: number): ReconcileResu
 }
 
 /**
- * 新进手的牌摆哪一格：**优先手牌右端外侧那格**，其次左端外侧，最后才填中间的洞。
+ * 把新进手的牌摆进散牌区：**一律从右端加**。
  *
- * 不能简单地取「第一个空格」：牌居中铺开之后左边本来就空着两格，摸到的牌会跳到
- * 最左边、和整手牌之间隔着个洞，看着像掉了一张。真牌桌上摸的牌就搁在右手边。
+ * 右端空格不够时，把已有的牌**整体左移**腾出来。是「整体」，不是「压实」：
+ * 相对顺序、以及牌与牌之间的空隙，都原样跟着走。玩家排的是一个图形，
+ * 平移不改变这个图形；压实会把他有意留的间隔吃掉（不变式 4 守的就是这个）。
  *
- * 中间的洞留到最后填，是为了守住不变式 4「绝不压实散牌区」的精神——
- * 那些洞是玩家打牌打出来的间隔，不该被新牌不声不响地补上。
+ * 为什么不是「找个最近的空格塞进去」：摸到的牌位置要**可预测**。永远在最右端，
+ * 玩家不用去找，刚摸的牌也就有了固定的高亮位置（§2 的 `drawn`）。真牌桌上
+ * 摸的牌也是搁在右手边的。
+ *
+ * **这条让不变式 3 从「槽位逐一不变」放宽成「要么不变、要么整体平移同一个量」。**
+ * 放宽是有代价的，但仍然可测；不放宽的话「右端加牌」在右端满时无解。
+ *
+ * 返回 null = 摆不下（整排 18 格连空隙都占满了），调用方从零重建。
  */
-function slotForNewTile(slots: LooseSlots): number {
+function addAtRight(
+  slots: LooseSlots,
+  tiles: readonly string[],
+  nextTileId: number,
+): { slots: LooseSlots; nextTileId: number } | null {
+  if (tiles.length === 0) return { slots, nextTileId };
+  let id = nextTileId;
+
   const filled = slots.reduce<number[]>((a, e, i) => (e ? (a.push(i), a) : a), []);
-  if (filled.length === 0) return initialOffset(1);
-  for (let i = filled[filled.length - 1] + 1; i < slots.length; i++) if (!slots[i]) return i;
-  for (let i = filled[0] - 1; i >= 0; i--) if (!slots[i]) return i;
-  return slots.indexOf(null);
+  // 手里一张牌都没有：居中铺，和开局同一个规则
+  if (filled.length === 0) {
+    if (tiles.length > LOOSE_SLOTS) return null;
+    const out = emptySlots();
+    const at = initialOffset(tiles.length);
+    tiles.forEach((tile, i) => (out[at + i] = { tileId: id++, tile }));
+    return { slots: out, nextTileId: id };
+  }
+
+  const min = filled[0];
+  const max = filled[filled.length - 1];
+  // 右端还剩几格；不够的部分就是要往左挪的量
+  const shift = Math.max(0, tiles.length - (LOOSE_SLOTS - 1 - max));
+  // 左移到头也腾不出来：整块牌（含中间空隙）已经铺满整排
+  if (shift > min) return null;
+
+  const out = emptySlots();
+  for (const i of filled) out[i - shift] = slots[i];
+  tiles.forEach((tile, k) => (out[max - shift + 1 + k] = { tileId: id++, tile }));
+  return { slots: out, nextTileId: id };
 }
 
 /**
@@ -192,16 +222,12 @@ export function reconcileLoose(
   const fresh: string[] = [];
   for (const [tile, n] of want) for (let k = 0; k < n; k++) fresh.push(tile);
 
-  let id = nextTileId;
-  for (const tile of fresh) {
-    const at = slotForNewTile(slots);
-    // 散牌区 18 格、手牌上限 14 张，正常填不满；填满了说明存档和局面已经对不上
-    if (at < 0) return rebuildLoose(me, id);
-    slots[at] = { tileId: id++, tile };
-  }
+  // 散牌区 18 格、手牌上限 14 张，正常摆得下；摆不下说明存档和局面已经对不上
+  const added = addAtRight(slots, fresh, nextTileId);
+  if (!added) return rebuildLoose(me, nextTileId);
 
-  assignGroupIds(slots, me.groups);
-  return { slots, nextTileId: id, rebuilt: false };
+  assignGroupIds(added.slots, me.groups);
+  return { slots: added.slots, nextTileId: added.nextTileId, rebuilt: false };
 }
 
 /**
