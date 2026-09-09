@@ -56,12 +56,16 @@ export const PLAYERS = 4;
 export const LOOSE_SLOTS = DEALER_HAND_SIZE + 4; // 18
 
 /**
- * 散牌区这一排**按满手 14 张居中**，多出来的 4 格腾挪余量挂在右边（见 setup-slots）。
+ * 整排 18 格**居中**，多出来的 4 格腾挪余量**左右各 2 格**——不是全挂在右边。
  *
- * 整排 18 格居中的话，手牌从第 0 格左对齐排起，画面上永远偏左两格——
- * 满手的时候尤其明显。居中的应该是**牌**，不是那排空格子。
+ * 于是满手 14 张落在正中间的 14 格里（下标 2..15），画面上是对称的；
+ * 往左往右都有地方挤牌（`shiftLeft` / `shiftRight`），也不必只能往一个方向腾。
+ *
+ * 「初始手牌摆在哪几格」是 A 层的事（`rebuildLoose` 会把牌居中铺），
+ * 这里只负责让**格子**居中。
  */
-export const LOOSE_CENTERED_ON = DEALER_HAND_SIZE; // 14
+export const LOOSE_SPARE_EACH_SIDE = 2;
+
 
 /**
  * 亮词区的行数 = `rules.max_melds()` 的**最大可能值**。

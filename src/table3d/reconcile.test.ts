@@ -8,6 +8,7 @@ import type { Me, State } from "../api";
 import { LOOSE_SLOTS } from "./layout";
 import {
   declareWild,
+  initialOffset,
   moveLoose,
   rebuildLoose,
   reconcileLoose,
@@ -42,6 +43,29 @@ describe("A 层：散牌区对账", () => {
     expect(after.slots.find((e) => e?.tile === "e")?.groupId).toBeUndefined();
   });
 
+  it("初始铺牌居中——满手 14 张正好落在正中间那 14 格", () => {
+    const full = rebuildLoose(me("abcdefghijklmn".split("")), 1);
+    const at = full.slots.findIndex((e) => e !== null);
+    expect(at).toBe(2); // 18 格排，左右各留 2 格
+    expect(full.slots.slice(2, 16).every((e) => e !== null)).toBe(true);
+    expect(full.slots[0]).toBeNull();
+    expect(full.slots[LOOSE_SLOTS - 1]).toBeNull();
+
+    // 13 张（非庄）同样居中
+    const thirteen = rebuildLoose(me("abcdefghijklm".split("")), 1);
+    expect(thirteen.slots.findIndex((e) => e !== null)).toBe(2);
+  });
+
+  it("摸到的牌摆在手牌右端，不跳到左边那两格空位上", () => {
+    // 居中铺开之后左边空着两格。若按「第一个空格」摆，摸的牌会跳到最左边，
+    // 和整手牌之间隔着个洞，看着像掉了一张
+    const a = rebuildLoose(me(["c", "a", "t"]), 1);
+    const at = initialOffset(3);
+    const b = reconcileLoose(me(["c", "a", "t", "s"]), a.slots, a.nextTileId);
+    expect(b.slots[at + 3]?.tile).toBe("s");
+    expect(b.slots.slice(0, at).every((e) => e === null)).toBe(true);
+  });
+
   it("留下来的牌一格都不动", () => {
     const a = rebuildLoose(me(["c", "a", "t", "e", "o"]), 1);
     const moved = moveLoose(moveLoose(a.slots, 0, 9), 4, 12);
@@ -57,18 +81,24 @@ describe("A 层：散牌区对账", () => {
     // [C][A][T][A]：打掉的是**前面**那个 A 时，剩下必须是 C _ T A，
     // 而不是把后面那个 A 挪上来变成 C A T _
     const a = rebuildLoose(me(["c", "a", "t", "a"]), 1);
-    const firstA = a.slots[1]!.tileId;
-    const lastA = a.slots[3]!.tileId;
+    // rebuildLoose 把牌**居中**铺开，所以下标要从居中起点算起
+    const at = initialOffset(4);
+    const firstA = a.slots[at + 1]!.tileId;
+    const lastA = a.slots[at + 3]!.tileId;
 
     const hinted = reconcileLoose(me(["c", "a", "t"]), a.slots, a.nextTileId, [firstA]);
-    expect(hinted.slots.map((e) => e?.tile ?? null).slice(0, 4)).toEqual(["c", null, "t", "a"]);
-    expect(hinted.slots[3]!.tileId).toBe(lastA); // 活下来的是后面那张，没被顶替
+    expect(hinted.slots.map((e) => e?.tile ?? null).slice(at, at + 4)).toEqual([
+      "c", null, "t", "a",
+    ]);
+    expect(hinted.slots[at + 3]!.tileId).toBe(lastA); // 活下来的是后面那张，没被顶替
 
     // 不给提示就退化到「从左到右留、多出来的从右边腾」。规则是确定的，
     // 只是未必是玩家心里想的那一张——这就是 consumedTileIds 存在的理由
     const blind = reconcileLoose(me(["c", "a", "t"]), a.slots, a.nextTileId);
-    expect(blind.slots.map((e) => e?.tile ?? null).slice(0, 4)).toEqual(["c", "a", "t", null]);
-    expect(blind.slots[1]!.tileId).toBe(firstA);
+    expect(blind.slots.map((e) => e?.tile ?? null).slice(at, at + 4)).toEqual([
+      "c", "a", "t", null,
+    ]);
+    expect(blind.slots[at + 1]!.tileId).toBe(firstA);
   });
 
   it("**绝不压实散牌区**——空格要留在原地", () => {
@@ -76,8 +106,11 @@ describe("A 层：散牌区对账", () => {
     // 「白搭声明挂 tileId」和「挂槽位」才是等价的。哪天有人图好看把数组压实，
     // 玩家排好的顺序会整体左移，白搭声明也会跟着张冠李戴
     const a = rebuildLoose(me(["c", "a", "t", "e", "o"]), 1);
+    const at = initialOffset(5);
     const b = reconcileLoose(me(["c", "t", "o"]), a.slots, a.nextTileId);
-    expect(b.slots.map((e) => e?.tile ?? null).slice(0, 5)).toEqual(["c", null, "t", null, "o"]);
+    expect(b.slots.map((e) => e?.tile ?? null).slice(at, at + 5)).toEqual([
+      "c", null, "t", null, "o",
+    ]);
   });
 
   it("tileId 永不回收——不制造 ABA", () => {
@@ -110,8 +143,9 @@ describe("A 层：散牌区对账", () => {
 describe("不变式 4：白搭声明不串位", () => {
   it("两张同种白搭声明不同字母，转移后各自的字母不对调", () => {
     const a = rebuildLoose(me(["1", "c", "1"]), 1);
-    const first = a.slots[0]!.tileId;
-    const second = a.slots[2]!.tileId;
+    const at = initialOffset(3);
+    const first = a.slots[at]!.tileId;
+    const second = a.slots[at + 2]!.tileId;
     let s = declareWild(a.slots, first, "a");
     s = declareWild(s, second, "e");
 
@@ -126,12 +160,13 @@ describe("不变式 4：白搭声明不串位", () => {
 
   it("声明挂在 tileId 上，拖动之后仍然跟着牌走", () => {
     const a = rebuildLoose(me(["1", "c", "2"]), 1);
-    const vowel = a.slots[0]!.tileId;
+    const at = initialOffset(3);
+    const vowel = a.slots[at]!.tileId;
     let s = declareWild(a.slots, vowel, "o");
-    s = moveLoose(s, 0, 7);
-    expect(s[7]!.tileId).toBe(vowel);
-    expect(s[7]!.wildLetter).toBe("o");
-    expect(s[0]).toBeNull();
+    s = moveLoose(s, at, at + 7);
+    expect(s[at + 7]!.tileId).toBe(vowel);
+    expect(s[at + 7]!.wildLetter).toBe("o");
+    expect(s[at]).toBeNull();
   });
 });
 

@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   DISCARD_COLS,
   DISCARD_ROWS,
-  LOOSE_CENTERED_ON,
   LOOSE_SLOTS,
+  LOOSE_SPARE_EACH_SIDE,
   MELD_ROWS,
   meldSlots,
   PLAYERS,
@@ -180,17 +180,21 @@ describe("散牌区", () => {
     expect(loose0.length).toBeGreaterThan(14); // 余量是 shiftLeft/shiftRight 挤牌用的
   });
 
-  it("整排在桌面之内，且**满手 14 张时**居中", () => {
+  it("整排在桌面之内且居中，腾挪余量左右各 2 格", () => {
     const first = loose0[0].places[0];
     const last = loose0[loose0.length - 1].places[0];
     expect(first.position.x - first.size.x / 2).toBeGreaterThanOrEqual(0);
     expect(last.position.x + last.size.x / 2).toBeLessThanOrEqual(WORLD_SIZE);
+    // 整排 18 格居中
+    expect((first.position.x + last.position.x) / 2).toBeCloseTo(WORLD_SIZE / 2);
 
-    // 居中的是**牌**，不是那排空格子。整排 18 格居中的话，手牌从第 0 格左对齐
-    // 排起，画面上永远偏左两格——T2.1 摆上真牌之后一眼就能看出来。
-    // 所以改成按满手 14 张居中，余下的 4 格腾挪余量挂在右边。
-    const lastHeld = loose0[LOOSE_CENTERED_ON - 1].places[0];
-    expect((first.position.x + lastHeld.position.x) / 2).toBeCloseTo(WORLD_SIZE / 2);
+    // 于是满手 14 张（下标 2..15）也正好居中——初始铺牌居中由 rebuildLoose 保证，
+    // 这里验的是「格子本身对称」这个前提
+    const held = loose0.slice(LOOSE_SPARE_EACH_SIDE, LOOSE_SPARE_EACH_SIDE + 14);
+    expect(held.length).toBe(14);
+    expect(
+      (held[0].places[0].position.x + held[13].places[0].position.x) / 2,
+    ).toBeCloseTo(WORLD_SIZE / 2);
   });
 
   it("shift 链把一排从头串到尾，且左右互为逆", () => {

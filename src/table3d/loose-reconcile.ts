@@ -107,15 +107,43 @@ function assignGroupIds(slots: LooseSlots, groups: readonly Word[]): void {
   });
 }
 
-/** 从零重建：按 hand 的顺序铺满前几格。刷新后第一帧、以及存档不可用时走这里 */
+/**
+ * 初始铺牌从第几格起——**居中**，不是从第 0 格左对齐。
+ *
+ * 槽位排本身是居中的（`setup-slots.ts`），左右各留 2 格腾挪余量。若还从第 0 格
+ * 铺起，13/14 张牌就整体偏左两格，画面上一眼就是歪的。
+ */
+export function initialOffset(count: number): number {
+  return Math.max(0, Math.floor((LOOSE_SLOTS - count) / 2));
+}
+
+/** 从零重建：按 hand 的顺序**居中**铺开。刷新后第一帧、以及存档不可用时走这里 */
 export function rebuildLoose(me: ReconcileMe, nextTileId: number): ReconcileResult {
   const slots = emptySlots();
   let id = nextTileId;
+  const at = initialOffset(me.hand.length);
   me.hand.forEach((tile, i) => {
-    if (i < LOOSE_SLOTS) slots[i] = { tileId: id++, tile };
+    if (at + i < LOOSE_SLOTS) slots[at + i] = { tileId: id++, tile };
   });
   assignGroupIds(slots, me.groups);
   return { slots, nextTileId: id, rebuilt: true };
+}
+
+/**
+ * 新进手的牌摆哪一格：**优先手牌右端外侧那格**，其次左端外侧，最后才填中间的洞。
+ *
+ * 不能简单地取「第一个空格」：牌居中铺开之后左边本来就空着两格，摸到的牌会跳到
+ * 最左边、和整手牌之间隔着个洞，看着像掉了一张。真牌桌上摸的牌就搁在右手边。
+ *
+ * 中间的洞留到最后填，是为了守住不变式 4「绝不压实散牌区」的精神——
+ * 那些洞是玩家打牌打出来的间隔，不该被新牌不声不响地补上。
+ */
+function slotForNewTile(slots: LooseSlots): number {
+  const filled = slots.reduce<number[]>((a, e, i) => (e ? (a.push(i), a) : a), []);
+  if (filled.length === 0) return initialOffset(1);
+  for (let i = filled[filled.length - 1] + 1; i < slots.length; i++) if (!slots[i]) return i;
+  for (let i = filled[0] - 1; i >= 0; i--) if (!slots[i]) return i;
+  return slots.indexOf(null);
 }
 
 /**
@@ -166,7 +194,7 @@ export function reconcileLoose(
 
   let id = nextTileId;
   for (const tile of fresh) {
-    const at = slots.indexOf(null);
+    const at = slotForNewTile(slots);
     // 散牌区 18 格、手牌上限 14 张，正常填不满；填满了说明存档和局面已经对不上
     if (at < 0) return rebuildLoose(me, id);
     slots[at] = { tileId: id++, tile };

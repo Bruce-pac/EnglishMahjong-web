@@ -2,7 +2,6 @@ import { Euler, Quaternion, Vector3 } from "three";
 import {
   DISCARD_COLS,
   DISCARD_ROWS,
-  LOOSE_CENTERED_ON,
   LOOSE_SLOTS,
   MELD_ROWS,
   meldSlots,
@@ -24,7 +23,7 @@ import { Size, ThingType } from "./types";
  * 亮词区在右手边，与牌墙同深度、在 x 上错开）：
  *
  * ```
- *   y  0.. 9   loose    散牌区，一整排 18 格，x 69..177（按满手 14 张居中，余量在右）
+ *   y  0.. 9   loose    散牌区，一整排 18 格居中 x 57..165（余量左右各 2 格）
  *   y  9..45   meld     亮词区 4 行 14/11/8/5，由 x=222 往左生长（贴着右下角，§3）
  *   y 27..36   wall     牌墙，**两层的墩**，玩家侧 15 墩 x 66..156（别家 13 墩）
  *   y 54..90   discard  牌河 4×7，x 90..132，**第 0 行贴着桌心**往外长
@@ -216,13 +215,15 @@ const START = {
    * **暗词不是独立的区**（需求文档 §3）：它就住在这一排里，只是被标记成一组，
    * 于是「组完暗词还能整体挪位置」直接复用这排的排列逻辑。
    *
-   * 按**满手 14 张**居中，余下的 4 格腾挪余量挂在右边：居中的该是牌，不是空格子。
+   * **整排 18 格居中，4 格腾挪余量左右各 2 格。** 满手 14 张正好落在正中间那 14 格里
+   * （下标 2..15），画面对称，往两边都挤得动。初始手牌摆在哪几格由 `rebuildLoose`
+   * 决定（它会居中铺），这里只负责让格子居中。
    */
   loose: () =>
     new Slot({
       name: "loose",
       group: "loose",
-      origin: new Vector3(centeredX(LOOSE_CENTERED_ON), 0, 0),
+      origin: new Vector3(centeredX(LOOSE_SLOTS), 0, 0),
       rotations: [Rotation.FACE_UP, Rotation.STANDING],
       canFlipMultiple: true,
       drawShadow: true,
