@@ -15,7 +15,7 @@ import { Group } from "three";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Envelope, State } from "../api";
 import { fakeAssetLoader } from "./fake-assets";
-import { TILE_COUNT } from "./layout";
+import { meldSlots, TILE_COUNT } from "./layout";
 import { ObjectView } from "./object-view";
 import { layout } from "./placement";
 import { rebuildLoose } from "./loose-reconcile";
@@ -24,6 +24,7 @@ import { TableView } from "./table-view";
 import { fixtureGames } from "./test-helpers";
 
 const slots = makeSlots();
+
 
 function envelopeOf(state: State, matchId = "m1"): Envelope {
   return { matchId, events: [], state, pending: null, result: null, matchFinished: false };
@@ -69,6 +70,31 @@ describe("layout() 的槽位名与 makeSlots() 对得上", () => {
         }
       }
     }
+  });
+
+  it("亮词靠右端码齐——末字母落在该行最后一格，紧贴桌沿", () => {
+    // fixture 里找一步有亮词、且词长短于整行的
+    let checked = 0;
+    for (const game of fixtureGames()) {
+      for (const step of game.steps) {
+        const r = rebuildLoose(step.state.me, 1);
+        const ps = layout(step.state, r.slots, { lowercase: false });
+        for (const seatMelds of [step.state.me, ...step.state.others]) {
+          seatMelds.melds.forEach((meld, row) => {
+            const cols = ps
+              .filter((p) => p.slotName.startsWith(`meld.${row}.`) &&
+                p.slotName.endsWith(`@${seatMelds.seat}`))
+              .map((p) => Number(p.slotName.split(".")[2].split("@")[0]));
+            if (cols.length === 0) return;
+            // 末字母坐在这一行的最后一格上
+            expect(Math.max(...cols), `${meld.word} 没有靠右码齐`).toBe(meldSlots(row) - 1);
+            checked++;
+          });
+        }
+      }
+    }
+    // fixture 里必须真的出现过亮词，否则上面那些断言等于没跑
+    expect(checked).toBeGreaterThan(0);
   });
 
   it("牌墙的 rotationIndex 恒为 0——写成 1 会取到 undefined，坐标变 NaN", () => {

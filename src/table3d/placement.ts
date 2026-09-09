@@ -122,18 +122,28 @@ export function orderByWord(tiles: string, word: string): Array<{ tile: string; 
 /**
  * 一家的亮词区。亮词永远公开、永远正面、永远大写。
  *
- * **一词一行**（§3.3）：第 i 行 `meldSlots(i)` 格 = 14/11/8/5，正好是
- * 「亮第 i 个词时手上最多有几张牌」，所以放得下的词一定放得下，
- * 越界只可能出现在服务端改了预算常量而这里没跟上。
+ * **一词一行、并且每个词都靠右端码齐**（§3：亮词区在右下角）。
+ *
+ * 行本身是右对齐的（`setup-slots.ts` 里每行从右边界往左退自己那么多格），但词
+ * 未必占满一行——第 0 行有 14 格，亮一个 9 字母的词只用掉 9 格。若把词摆在
+ * 行首，右边就空出 5 格 30 个单位，整块亮词区看着离桌角老远。所以词从**行尾**
+ * 起算：末字母永远落在最右那格，紧贴桌沿。
+ *
+ * 每行 `meldSlots(i)` 格 = 14/11/8/5，正好是「亮第 i 个词时手上最多有几张牌」，
+ * 所以放得下的词一定放得下；越界只可能是服务端改了预算常量而这里没跟上。
  */
 function layMelds(melds: readonly Word[], seat: number, out: Placement[]): void {
   melds.forEach((meld, row) => {
     if (row >= MELD_ROWS) return; // 亮词数超过 max_melds()，只可能是常量脱节
     const cells = orderByWord(meld.tiles, meld.word);
+    const width = meldSlots(row);
+    // 靠右端码齐：长度不足就把左边空出来，不是把右边空出来
+    const first = Math.max(0, width - cells.length);
     cells.forEach((cell, i) => {
-      if (i >= meldSlots(row)) return;
+      const col = first + i;
+      if (col >= width) return;
       out.push({
-        slotName: `meld.${row}.${i}@${seat}`,
+        slotName: `meld.${row}.${col}@${seat}`,
         typeIndex: faceOf(cell.tile, cell.wild, false),
         backVariant: 0,
         rotationIndex: ONLY,
