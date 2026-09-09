@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2 } from "three";
+import { Size, ThingType } from "./types";
 import { api, type Envelope, type MatchConfig } from "../api";
 import { AssetLoader } from "./asset-loader";
 import { WORLD_SIZE } from "./layout";
@@ -63,17 +64,18 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     const mainGroup = new Group();
     mainGroup.matrixAutoUpdate = false;
 
-    // 桌面 174×174，右手系、z 向上。
+    // 桌面，右手系、z 向上。
     //
-    // 174 不是随手取的：牌尺寸已经定死为 Size.TILE = (6, 9, 4)（需求文档 §7.1，
-    // models.glb 就是按这个导出的），牌宽 6 / 桌宽 174 = 3.4%，与真实麻将
-    // （26mm / 900mm ≈ 2.9%）接近。所以 1 个单位 ≈ 5.2 毫米，不是 1 厘米。
-    // 常量在 layout.ts，Slot.rotate() 拿同一个值当旋转中心——两处对不上的话
-    // 四家的槽位会绕着错误的圆心转。
-    const tableGeometry = new PlaneGeometry(WORLD_SIZE, WORLD_SIZE);
+    // 边长比槽位区多一个牌高（照 Autotable 的 `WIDTH + Size.TILE.y`）：贴着桌沿的
+    // 散牌区外面留一圈台面，牌看起来才是「摆在桌上」而不是「悬在边缘」。
+    //
+    // WORLD_SIZE 是 222，不是 Autotable 的 174——我们每家要摆的东西多得多
+    // （18 格散牌区、14 格亮词行、15 墩牌墙），见 layout.ts 的推导。
+    const tableSize = WORLD_SIZE + Size[ThingType.TILE].y;
+    const tableGeometry = new PlaneGeometry(tableSize, tableSize);
     const tableMaterial = new MeshLambertMaterial({ color: 0x1d6b4a });
     const table = new Mesh(tableGeometry, tableMaterial);
-    // 槽位坐标是 0..174，桌面几何是以原点为中心的，所以要挪半个身位对上
+    // 槽位坐标是 0..WORLD_SIZE，桌面几何以原点为中心，所以要挪半个身位对上
     table.position.set(WORLD_SIZE / 2, WORLD_SIZE / 2, 0);
     table.matrixAutoUpdate = false;
     table.updateMatrix();

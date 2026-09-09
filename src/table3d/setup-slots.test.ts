@@ -8,7 +8,6 @@ import {
   MELD_ROWS,
   meldSlots,
   PLAYERS,
-  MELD_COLS,
   WALL_LAYERS,
   WALL_SLOTS_TOTAL,
   WALL_STACKS_OTHER,
@@ -203,17 +202,27 @@ describe("散牌区", () => {
 });
 
 describe("亮词区", () => {
-  it("7 列 × 4 行 —— 形状是被牌墙挤出来的，不是 §3.3 的 14/11/8/5", () => {
+  it("行数 = max_melds() 的最大值 4，第 i 行 14-3i 格", () => {
     expect(MELD_ROWS).toBe(4);
     for (let r = 0; r < MELD_ROWS; r++) {
       const inRow = [...slots.values()].filter(
         (s) => s.group === "meld" && s.seat === 0 && s.indexes[0] === r,
       );
-      expect(inRow.length, `第 ${r} 行`).toBe(MELD_COLS);
+      expect(inRow.length, `第 ${r} 行`).toBe(meldSlots(r));
     }
+    expect([0, 1, 2, 3].map(meldSlots)).toEqual([14, 11, 8, 5]);
   });
 
-  it("整体不出桌面", () => {
+  it("右对齐生长，最长那行居中，整体不出桌面", () => {
+    const rowStart = (r: number) => slots.get(`meld.${r}.0@0`)!.places[0];
+    // 四行的右边齐平
+    for (let r = 1; r < MELD_ROWS; r++) {
+      expect(rowStart(r).position.x).toBeCloseTo(rowStart(0).position.x);
+    }
+    // 最长那行（14 格）居中
+    const last = slots.get(`meld.0.${meldSlots(0) - 1}@0`)!.places[0];
+    expect((rowStart(0).position.x + last.position.x) / 2).toBeCloseTo(WORLD_SIZE / 2);
+
     for (const s of slots.values()) {
       if (s.group !== "meld" || s.seat !== 0) continue;
       const p = s.places[0];
@@ -242,10 +251,11 @@ describe("牌河", () => {
     expect(inner.position.y + inner.size.y / 2).toBeCloseTo((WORLD_SIZE - DISCARD_COLS * TILE.x) / 2);
   });
 
-  it("每家一片，3×9 = 27 格", () => {
+  it("每家一片，4×7 = 28 格", () => {
     for (let seat = 0; seat < PLAYERS; seat++) {
       const mine = [...slots.values()].filter((s) => s.group === "discard" && s.seat === seat);
       expect(mine.length).toBe(DISCARD_ROWS * DISCARD_COLS);
+      expect(DISCARD_ROWS * DISCARD_COLS).toBe(28);
     }
   });
 
@@ -316,8 +326,8 @@ describe("四个区互不重叠", () => {
     expect(bad.slice(0, 5)).toEqual([]);
   });
 
-  it("桌心留出 54×54 的空地给记分盘", () => {
-    const lo = (WORLD_SIZE - 54) / 2;
+  it("桌心留出的空地边长 = 牌河宽度，四片牌河才能拼成风车", () => {
+    const lo = (WORLD_SIZE - DISCARD_COLS * TILE.x) / 2;
     const hi = WORLD_SIZE - lo;
     for (const s of slots.values()) {
       const p = s.places[0];

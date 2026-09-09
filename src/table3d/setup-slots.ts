@@ -1,11 +1,11 @@
-import { Euler, Quaternion, Vector3 } from "three";
+import { Euler, Quaternion, Vector2, Vector3 } from "three";
 import {
   DISCARD_COLS,
   DISCARD_ROWS,
   LOOSE_CENTERED_ON,
   LOOSE_SLOTS,
-  MELD_COLS,
   MELD_ROWS,
+  meldSlots,
   WALL_LAYERS,
   WALL_STACKS_OTHER,
   WALL_STACKS_PLAYER,
@@ -20,14 +20,15 @@ import { Size, ThingType } from "./types";
  * 只为 **0 号座位**（屏幕下方，面朝 +y）定义一次，其余三家绕桌心转 90°/180°/270°
  * 复制出来。坐标系：桌面 0..174 见方，z 向上，牌面朝 +z。
  *
- * 0 号座位从桌沿往桌心排开（次序照真牌桌与 Autotable：手牌 → 牌墙 → 牌河 → 桌心）：
+ * 0 号座位从桌沿往桌心排开（次序照真牌桌与 Autotable：手牌 → 牌墙 → 亮词 → 牌河 → 桌心）。
+ * 四条带子一层层码在身前，全部 x 居中：
  *
  * ```
- *   y  0.. 9   loose    散牌区，一整排 18 格，x 45..153（按满手 14 张居中，余量在右）
- *   y  9..18   wall     牌墙，**两层的墩**，玩家侧 15 墩 x 42..132（别家 13 墩）
- *   y 18..54   meld     亮词区 7 列 × 4 行，x 18..60（形状是被牌墙挤出来的，见下）
- *   y 33..60   discard  牌河 3×9，x 60..114，**第 0 行贴着桌心**往外长
- *   x/y 60..114         中央 54×54 空地，留给记分盘（D12，T2.2）
+ *   y  0.. 9   loose    散牌区，一整排 18 格，x 69..177（按满手 14 张居中，余量在右）
+ *   y  9..18   wall     牌墙，**两层的墩**，玩家侧 15 墩 x 66..156（别家 13 墩 x 72..150）
+ *   y 18..54   meld     亮词区 4 行 14/11/8/5，由 x=153 往左生长，x 69..153
+ *   y 54..90   discard  牌河 4×7，x 90..132，**第 0 行贴着桌心**往外长
+ *   x/y 90..132         中央 42×42 空地，留给记分盘（D12，T2.2）
  * ```
  *
  * **两条不能破的几何约束**（需求文档 §3.2）：
@@ -105,6 +106,27 @@ function stack(): SlotOp {
   return repeat(WALL_LAYERS, new Vector3(0, 0, DZ));
 }
 
+/**
+ * 亮词区每行长度不同（第 i 行 `meldSlots(i)` 格），`row()` 那种「每行一样长」的
+ * 复制表达不了，所以单独一个算子：先 column 出 4 行，再逐行按各自的长度铺开。
+ */
+function meldRows(): SlotOp {
+  return (slots) => {
+    const result: Array<Slot> = [];
+    for (const slot of slots) {
+      const rowIndex = slot.indexes[slot.indexes.length - 1];
+      for (let i = 0; i < meldSlots(rowIndex); i++) {
+        const copied = slot.copy(`.${i}`);
+        // direction 是 (-1, 1)，牌往 −x 长；origin 也要跟着往 −x 走
+        copied.origin = copied.origin.clone().add(new Vector3(-DX * i, 0, 0));
+        copied.indexes.push(i);
+        result.push(copied);
+      }
+    }
+    return result;
+  };
+}
+
 /** 把整套格子复制到指定座位（默认四家），各自绕桌心旋转 */
 function seats(which: number[] = [0, 1, 2, 3]): SlotOp {
   return (slots) => {
@@ -134,8 +156,14 @@ const CENTER_HOLE_EDGE = (WORLD_SIZE - CENTER_HOLE) / 2; // 60
 const WALL_Y = DY; // 9
 /** 亮词区的近侧边：紧贴牌墙背后 */
 const MELD_Y = WALL_Y + DY; // 18
-/** 亮词区的左边界。再往左是下家亮词区转过来的地盘 */
-const MELD_X = 3 * DX; // 18
+/**
+ * 亮词区的右边界（每行从这里往 −x 长）。
+ *
+ * 取「最长那行居中」：14 格 = 84 长，居中就是 x 69..153。再往右会撞上
+ * 下家转过来的地盘，再往左则和上家的撞——这个位置是穷举四家旋转副本之后
+ * 唯一能容下 84×36 的一档。
+ */
+const MELD_RIGHT = centeredX(meldSlots(0)) + meldSlots(0) * DX; // 153
 
 const START = {
   /**
@@ -162,16 +190,19 @@ const START = {
    * 亮词区。亮词是公开信息（连别家的 `melds` 都给真实字母，需求文档 §10 第 7 条），
    * 所以只有正面朝上一种朝向。永久冻结不可拖动，也就不需要 shift 链。
    *
-   * **位置和形状都是被牌墙挤出来的。** 摆上两层的牌墙之后，把四家旋转副本一起算，
-   * 桌上最大的合法空矩形就只剩这块 7 列 × 4 行（x 18..60 × y 18..54）。
-   * 需求文档 §3 说亮词区在「右下角」、§3.3 说 4 行 14/11/8/5——那是牌墙还没摆上桌
-   * 时推的，一行 14 格 = 84 长，站不下。见 layout.ts 的 MELD_COLS 注释。
+   * 4 行、第 i 行 `meldSlots(i)` 格（14/11/8/5，§3.3），`direction = (-1, 1)`
+   * 让每行从右往左长——**右对齐**，于是长短不一的四行有一条齐整的右边。
+   *
+   * 这一整块最长一行 84 长，在原来 174 的桌面上站不下（摆上两层牌墙之后，
+   * 桌上最大的合法空矩形只剩 28 格）。桌面放大到 222 之后它才回到身前这条带子上，
+   * 而不是被挤到某个角落里。
    */
   meld: () =>
     new Slot({
       name: "meld",
       group: "meld",
-      origin: new Vector3(MELD_X, MELD_Y, 0),
+      origin: new Vector3(MELD_RIGHT, MELD_Y, 0),
+      direction: new Vector2(-1, 1),
       rotations: [Rotation.FACE_UP],
     }),
 
@@ -213,7 +244,7 @@ const START = {
 export function makeSlots(): Map<string, Slot> {
   const groups: Array<Array<SlotOp>> = [
     [start(START.loose()), row(LOOSE_SLOTS, DX, { shift: true }), seats()],
-    [start(START.meld()), column(MELD_ROWS), row(MELD_COLS), seats()],
+    [start(START.meld()), column(MELD_ROWS), meldRows(), seats()],
     // 牌河：先按 −DY 往外铺 3 行（第 0 行贴桌心），每行再往 +x 铺 9 格
     [start(START.discard()), column(DISCARD_ROWS, -DY), row(DISCARD_COLS), seats()],
     // 牌墙：玩家侧 15 墩、别家各 13 墩，每墩两层。名字是 wall.<第几墩>.<第几层>

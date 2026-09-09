@@ -118,26 +118,24 @@ export function orderByWord(tiles: string, word: string): Array<{ tile: string; 
 /**
  * 一家的亮词区。亮词永远公开、永远正面、永远大写。
  *
- * 每行 `meldSlots()` 格（7），**一个词从新的一行起、放不下就折到下一行**——
- * 亮词区被牌墙挤到只剩 7×4（见 layout.ts 的 MELD_COLS），而英语单词可以长到 13 个
- * 字母，一词一行装不下。摆不下的整体丢弃（不画半个词），溢出是显示问题，
- * 不影响任何规则。
+ * **一词一行**（§3.3）：第 i 行 `meldSlots(i)` 格 = 14/11/8/5，正好是
+ * 「亮第 i 个词时手上最多有几张牌」，所以放得下的词一定放得下，
+ * 越界只可能出现在服务端改了预算常量而这里没跟上。
  */
 function layMelds(melds: readonly Word[], seat: number, out: Placement[]): void {
-  let row = 0;
-  for (const meld of melds) {
+  melds.forEach((meld, row) => {
+    if (row >= MELD_ROWS) return; // 亮词数超过 max_melds()，只可能是常量脱节
     const cells = orderByWord(meld.tiles, meld.word);
-    if (row + Math.ceil(cells.length / meldSlots(row)) > MELD_ROWS) return; // 摆不下了
     cells.forEach((cell, i) => {
+      if (i >= meldSlots(row)) return;
       out.push({
-        slotName: `meld.${row + Math.floor(i / meldSlots(row))}.${i % meldSlots(row)}@${seat}`,
+        slotName: `meld.${row}.${i}@${seat}`,
         typeIndex: faceOf(cell.tile, cell.wild, false),
         backVariant: 0,
         rotationIndex: ONLY,
       });
     });
-    row += Math.ceil(cells.length / meldSlots(row));
-  }
+  });
 }
 
 /**
