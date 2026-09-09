@@ -154,7 +154,21 @@ export class TableView {
    * 2. 提交牌面（快路径 `updateThingTypes`）
    * 3. 摆位置、交给 ObjectView
    */
-  private commit(placements: Placement[]): void {
+  private commit(all: Placement[]): void {
+    // Thing 池是**零余量的 108**（T1.4 方案 §4.2）：全副牌在任何时刻都分布在
+    // 散牌区、亮词区、牌河、牌墙里，正好用满。真实牌局不可能超，但
+    // `/api/dev` 后门能摆出超编的局面——`dev.py` 的 nextDraw 是
+    // `engine.wall.append()`，只加不减，还会顶掉真人原来那手牌。
+    //
+    // 超了就把尾巴丢掉：`layout()` 最后摆的是牌墙，所以丢掉的正好是最不要紧的
+    // 那几张。不加这道护栏的话，第 109 张会取到 undefined，崩在
+    // 「Cannot set properties of undefined」上——根本看不出根因。
+    let placements = all;
+    if (all.length > TILE_COUNT) {
+      console.warn(`牌张数超过一副牌：${all.length} > ${TILE_COUNT}，多出来的不画`);
+      placements = all.slice(0, TILE_COUNT);
+    }
+
     const assign = assignThings(
       placements,
       this.lastSlotName,

@@ -226,17 +226,31 @@ describe("亮词区", () => {
     expect([0, 1, 2, 3].map(meldSlots)).toEqual([14, 11, 8, 5]);
   });
 
-  it("右对齐、在右手边，且离桌沿留出一个牌高", () => {
-    const rowStart = (r: number) => slots.get(`meld.${r}.0@0`)!.places[0];
-    // 四行的右边齐平
+  it("右对齐、尽量塞进右下角", () => {
+    // 每行最后一格（= 单词的最后一个字母）落在同一条右边线上
+    const rowEnd = (r: number) => slots.get(`meld.${r}.${meldSlots(r) - 1}@0`)!.places[0];
     for (let r = 1; r < MELD_ROWS; r++) {
-      expect(rowStart(r).position.x).toBeCloseTo(rowStart(0).position.x);
+      expect(rowEnd(r).position.x).toBeCloseTo(rowEnd(0).position.x);
     }
+    // 下标 0 是最左边那格：单词才会从左往右读，而不是倒着摆
+    for (let r = 0; r < MELD_ROWS; r++) {
+      const first = slots.get(`meld.${r}.0@0`)!.places[0];
+      expect(first.position.x, `第 ${r} 行`).toBeLessThan(rowEnd(r).position.x);
+    }
+    const rowStart = rowEnd;
     // 在桌子的右半边（需求文档 §3：亮词区在右下角）
     expect(rowStart(0).position.x).toBeGreaterThan(WORLD_SIZE / 2);
-    // §3.2 约束 ②：贴着桌沿的话，转 90° 之后会压在下家的散牌区上
+    // 贴着桌沿（§3「右下角」）。转 90° 之后会不会压到下家，由「四家之间不重叠」
+    // 那条按格子逐一验——不是靠在这里留一个牌高的余量猜
     const right = rowStart(0).position.x + rowStart(0).size.x / 2;
-    expect(WORLD_SIZE - right).toBeGreaterThanOrEqual(TILE.y);
+    expect(WORLD_SIZE - right).toBeLessThanOrEqual(TILE.x);
+
+    // 也尽量贴近桌沿那一侧：首行紧挨着散牌区，再往角落挪就压上散牌区了
+    const firstRowNear = slots.get("meld.0.0@0")!.places[0];
+    const hand = slots.get("loose.0@0")!.places[0];
+    expect(firstRowNear.position.y - firstRowNear.size.y / 2).toBeCloseTo(
+      hand.position.y + hand.size.y / 2,
+    );
 
     for (const s of slots.values()) {
       if (s.group !== "meld" || s.seat !== 0) continue;

@@ -1,4 +1,4 @@
-import { Euler, Quaternion, Vector2, Vector3 } from "three";
+import { Euler, Quaternion, Vector3 } from "three";
 import {
   DISCARD_COLS,
   DISCARD_ROWS,
@@ -25,7 +25,7 @@ import { Size, ThingType } from "./types";
  *
  * ```
  *   y  0.. 9   loose    散牌区，一整排 18 格，x 69..177（按满手 14 张居中，余量在右）
- *   y  9..45   meld     亮词区 4 行 14/11/8/5，由 x=210 往左生长（右下角，§3）
+ *   y  9..45   meld     亮词区 4 行 14/11/8/5，由 x=222 往左生长（贴着右下角，§3）
  *   y 27..36   wall     牌墙，**两层的墩**，玩家侧 15 墩 x 66..156（别家 13 墩）
  *   y 54..90   discard  牌河 4×7，x 90..132，**第 0 行贴着桌心**往外长
  *   x/y 90..132         中央 42×42 空地，留给记分盘（D12，T2.2）
@@ -124,10 +124,16 @@ function meldRows(): SlotOp {
     const result: Array<Slot> = [];
     for (const slot of slots) {
       const rowIndex = slot.indexes[slot.indexes.length - 1];
-      for (let i = 0; i < meldSlots(rowIndex); i++) {
+      const n = meldSlots(rowIndex);
+      for (let i = 0; i < n; i++) {
         const copied = slot.copy(`.${i}`);
-        // direction 是 (-1, 1)，牌往 −x 长；origin 也要跟着往 −x 走
-        copied.origin = copied.origin.clone().add(new Vector3(-DX * i, 0, 0));
+        // **下标 0 是这一行最左边那格**，也就是单词的第一个字母。
+        //
+        // 一度写成从右往左编号（配 `direction = (-1, 1)`），四行的右边确实齐平了，
+        // 但 `layMelds` 把第 i 个字母摆进第 i 格，于是整个词是倒着的——
+        // 摆出来是 SRETUPMOC。行是右对齐的、字母是左起的，两件事要分开：
+        // 右对齐靠**每行自己的起点**（右边界往左退 n 格），不靠反向编号。
+        copied.origin = copied.origin.clone().add(new Vector3(-DX * (n - i), 0, 0));
         copied.indexes.push(i);
         result.push(copied);
       }
@@ -174,16 +180,21 @@ const WALL_Y = DY + HAND_TO_WALL_GAP; // 27
 /** 亮词区的近侧边：紧贴散牌区背后，从右手边往里长 */
 const MELD_Y = DY; // 9
 /**
- * 亮词区的右边界（每行从这里往 −x 长）。
+ * 亮词区的右边界（每行从这里往 −x 长）——**齐着桌沿，尽量塞进右下角**。
  *
- * **在自己的右手边**，需求文档 §3 的原话。它和牌墙同处一条深度带，但在 x 上错开：
- * 阶梯越往里越短（14/11/8/5），正好从牌墙右端（x=156）旁边让过去。
+ * 需求文档 §3 说亮词区在右下角，那就贴到底：右边界 = WORLD_SIZE，桌面网格比槽位区
+ * 大半个牌高（`Table3D.tsx` 的 `WORLD_SIZE + TILE.y`），所以牌仍然稳稳落在台面上。
  *
- * 距桌沿留 12（> 一个牌高 9，§3.2 约束 ②）——贴着 x=222 的话，转 90° 之后
- * 它就压在下家的散牌区上。这个位置是按**格子**穷举四家旋转副本之后选出来的
- * （按边界盒判定会误判成放不下：阶梯与阶梯是可以互相咬合的）。
+ * **再往角落挪不动了**：往 −y 走一格（首行 y=0）会撞上自己的散牌区——那一排横跨
+ * x 69..177，而亮词第 0 行有 14 格 = 84 长，怎么摆都压得上去。真正的角落方块
+ * （x 177..222 × y 0..9）只有 45 宽，塞不下任何一行。
+ *
+ * §3.2 约束 ② 原本要求离桌沿留一个牌高，理由是「转 90° 之后会压在下家的散牌区上」。
+ * 那条在散牌区横贯整条边时成立；现在散牌区只占 x 69..177，转过去的亮词区落在
+ * x 204..213 / y 216..222，正好从下家散牌区右端外侧让过去——按**格子**逐一验过，
+ * 四家的旋转副本互不相犯（`setup-slots.test.ts` 那条「四家之间不重叠」守着）。
  */
-const MELD_RIGHT = WORLD_SIZE - 2 * DX; // 210
+const MELD_RIGHT = WORLD_SIZE; // 222，齐着桌沿
 
 const START = {
   /**
@@ -214,8 +225,9 @@ const START = {
    * 亮词区。亮词是公开信息（连别家的 `melds` 都给真实字母，需求文档 §10 第 7 条），
    * 所以只有正面朝上一种朝向。永久冻结不可拖动，也就不需要 shift 链。
    *
-   * 4 行、第 i 行 `meldSlots(i)` 格（14/11/8/5，§3.3），`direction = (-1, 1)`
-   * 让每行从右往左长——**右对齐**，于是长短不一的四行有一条齐整的右边。
+   * 4 行、第 i 行 `meldSlots(i)` 格（14/11/8/5，§3.3）。**四行右对齐**——每行的
+   * 起点是右边界往左退自己那么多格，于是长短不一的四行有一条齐整的右边。
+   * 格子下标仍然**从左往右**数，第 0 格是单词的第一个字母（见 meldRows）。
    *
    * 这一整块最长一行 84 长，在原来 174 的桌面上站不下（摆上两层牌墙之后，
    * 桌上最大的合法空矩形只剩 28 格）。桌面放大到 222 之后它才回到身前这条带子上，
@@ -226,7 +238,6 @@ const START = {
       name: "meld",
       group: "meld",
       origin: new Vector3(MELD_RIGHT, MELD_Y, 0),
-      direction: new Vector2(-1, 1),
       rotations: [Rotation.FACE_UP],
     }),
 
