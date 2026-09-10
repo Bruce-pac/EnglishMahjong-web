@@ -226,3 +226,111 @@ describe("TableView 悬停", () => {
     expect(tableView.hoveredThing).toBeNull();
   });
 });
+
+describe("MouseUi 框选（T3.3）", () => {
+  /** 散牌区的牌按 x 从左到右排好 */
+  const row = (tv: TableView) => [...tv.pickables].sort((a, b) => a.place.position.x - b.place.position.x);
+  const topOf = (t: { place: { position: Vector3; size: Vector3 } }) =>
+    t.place.position.clone().setZ(t.place.position.z + t.place.size.z / 2);
+
+  it("退化矩形（单击，宽高为 0）不崩，还能选中点下去的那张", () => {
+    const { tableView, mouseUi } = setup();
+    for (const camera of Object.values(cameras())) {
+      const t = row(tableView)[3];
+      const p = mouseAt(topOf(t), camera);
+      const hits = mouseUi.select(p, p.clone(), camera);
+      expect(hits).toEqual([t.id]);
+    }
+  });
+
+  for (const [name, camera] of Object.entries(cameras())) {
+    it(`${name}：从一张牌的中心框到另一张的中心，正好选中这一段`, () => {
+      const { tableView, mouseUi } = setup();
+      const r = row(tableView);
+      const a = mouseAt(topOf(r[2]), camera);
+      const b = mouseAt(topOf(r[5]), camera);
+      const hits = mouseUi.select(a, b, camera);
+      expect(new Set(hits)).toEqual(new Set(r.slice(2, 6).map((t) => t.id)));
+    });
+  }
+
+  it("框住整张桌子也只选自己散牌区的牌", () => {
+    const { tableView, mouseUi } = setup();
+    const camera = cameras().top;
+    const hits = mouseUi.select(new Vector2(-1, -1), new Vector2(1, 1), camera);
+    expect(new Set(hits)).toEqual(new Set(tableView.pickables.map((t) => t.id)));
+  });
+
+  it("框别家的牌、牌墙、牌河的区域什么都不选", () => {
+    const { tableView, mouseUi } = setup();
+    const camera = cameras().top;
+    const slots = makeSlots();
+    const areas = ["loose.5@2", "wall.3.0@1", "discard.0.0@0", "discard.0.3@2"];
+    for (const name of areas) {
+      const p = slots.get(name)!.place(0).position;
+      const a = mouseAt(p.clone().add(new Vector3(-4, -4, 0)), camera);
+      const b = mouseAt(p.clone().add(new Vector3(4, 4, 0)), camera);
+      expect(mouseUi.select(a, b, camera), name).toEqual([]);
+    }
+    void tableView;
+  });
+
+  it("project 与 raycastLevel 互逆：桌面上的点投到屏幕再打回来还是它", () => {
+    const { mouseUi } = setup();
+    for (const camera of Object.values(cameras())) {
+      const p = new Vector3(80, 50, 0);
+      const back = mouseUi.raycastLevel(mouseUi.project(p, camera), camera, 0)!;
+      expect(back.x).toBeCloseTo(80, 3);
+      expect(back.y).toBeCloseTo(50, 3);
+    }
+  });
+});
+
+describe("TableView 选中（T3.3）", () => {
+  it("按 tileId 记、按槽位顺序取出，并交给描边", () => {
+    const { tableView, objectView } = setup();
+    const r = [...tableView.pickables].sort((a, b) => a.place.position.x - b.place.position.x);
+    expect(tableView.setSelected([r[4].id, r[1].id])).toBe(true);
+    const ids = tableView.selectedTileIds();
+    const expected = tableView.looseSlots.flatMap((e) => (e ? [e.tileId] : []));
+    // 散牌区从左往右第 1、第 4 张
+    expect(ids).toEqual([expected[1], expected[4]]);
+    expect(objectView.selectedObjects.length).toBe(2);
+    // 同一组再设一次不重新提交
+    expect(tableView.setSelected([r[1].id, r[4].id])).toBe(false);
+  });
+
+  it("不可拾取的编号忽略", () => {
+    const { tableView } = setup();
+    const other = [...tableView.slotNames].find(([, n]) => !n.startsWith("loose.") || !n.endsWith("@0"))![0];
+    tableView.setSelected([other]);
+    expect(tableView.selectedTileIds()).toEqual([]);
+  });
+
+  it("新 envelope 到来后，还在散牌区的牌保持选中，离开的去掉", () => {
+    const steps = fixtureGames()[0].steps;
+    const mid = Math.floor(steps.length / 2);
+    const { tableView } = setup();
+    tableView.setSelected(tableView.pickables.map((t) => t.id));
+    const before = tableView.selectedTileIds();
+    // 往后走几步，保证有牌打出去、有牌摸进来
+    tableView.apply(envelopeOf(steps[mid + 3].state));
+    const live = new Set(tableView.looseSlots.flatMap((e) => (e ? [e.tileId] : [])));
+    const after = tableView.selectedTileIds();
+    expect(after).toEqual(before.filter((id) => live.has(id)));
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.length).toBeLessThan(live.size + 1);
+    // 描边的牌数跟着走
+    expect(new Set(after).size).toBe(after.length);
+  });
+
+  it("拖动一张牌时清空选中", () => {
+    const { tableView } = setup();
+    tableView.setSelected(tableView.pickables.map((t) => t.id));
+    const t = tableView.pickables[0];
+    tableView.setHovered(t.id);
+    expect(tableView.dragStart(t.place.position.clone())).toBe(true);
+    expect(tableView.selectedTileIds()).toEqual([]);
+    tableView.cancelDrag();
+  });
+});

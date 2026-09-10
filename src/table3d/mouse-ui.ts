@@ -1,6 +1,8 @@
 import {
+  Box3,
   BoxGeometry,
   Camera,
+  Frustum,
   Group,
   Matrix4,
   Mesh,
@@ -42,6 +44,7 @@ export class MouseUi {
   private currentObjects: Mesh[] = [];
 
   private readonly viewToWorld = new Matrix4();
+  private readonly frustum = new Frustum();
 
   constructor(private readonly mainGroup: Group) {
     this.raycastGroup.visible = false;
@@ -117,6 +120,70 @@ export class MouseUi {
     if (hits.length === 0) return null;
     // 相机组在转、牌不在转，坐标统一回 mainGroup
     return this.mainGroup.worldToLocal(hits[0].point.clone());
+  }
+
+  /**
+   * 框选（T3.3，照 Autotable 的 `selection-box.ts`，研究笔记 §4.3）：屏幕上的矩形
+   * （两个归一化角点）反投影回世界空间构成视锥，和代理体的 AABB 做 `intersectsBox`。
+   * 只在 `updateObjects` 给的候选里挑，所以框到别家的牌、牌墙、牌河也不算。
+   *
+   * 反投影和 `setRay` 一样走渲染用的视图矩阵，不走带 scale 的 `matrixWorld`。
+   * 透视和正交都按「近平面四角 + 远平面四角」建六个面，不分支。
+   */
+  select(a: Vector2, b: Vector2, camera: Camera): number[] {
+    let left = Math.min(a.x, b.x);
+    let right = Math.max(a.x, b.x);
+    let down = Math.min(a.y, b.y);
+    let top = Math.max(a.y, b.y);
+    // 退化矩形保护：单击时宽高为 0，setFromCoplanarPoints 会算出退化平面、整个视锥失效
+    const eps = 0.01;
+    if (right - left < eps) {
+      left -= eps / 2;
+      right += eps / 2;
+    }
+    if (top - down < eps) {
+      down -= eps / 2;
+      top += eps / 2;
+    }
+
+    const toWorld = this.viewToWorld.copy(camera.matrixWorldInverse).invert();
+    const un = (x: number, y: number, z: number) =>
+      new Vector3(x, y, z).applyMatrix4(camera.projectionMatrixInverse).applyMatrix4(toWorld);
+    const tl = un(left, top, -1);
+    const tr = un(right, top, -1);
+    const dr = un(right, down, -1);
+    const dl = un(left, down, -1);
+    const ftl = un(left, top, 1);
+    const ftr = un(right, top, 1);
+    const fdr = un(right, down, 1);
+    const fdl = un(left, down, 1);
+
+    const planes = this.frustum.planes;
+    planes[0].setFromCoplanarPoints(tl, ftl, ftr);
+    planes[1].setFromCoplanarPoints(tr, ftr, fdr);
+    planes[2].setFromCoplanarPoints(fdr, fdl, dl);
+    planes[3].setFromCoplanarPoints(fdl, ftl, tl);
+    planes[4].setFromCoplanarPoints(tr, dr, dl);
+    planes[5].setFromCoplanarPoints(fdr, ftr, ftl);
+    planes[5].normal.multiplyScalar(-1);
+
+    const box = new Box3();
+    const hits: number[] = [];
+    if (!this.boxGeometry.boundingBox) this.boxGeometry.computeBoundingBox();
+    for (const obj of this.currentObjects) {
+      box.copy(this.boxGeometry.boundingBox!).applyMatrix4(obj.matrixWorld);
+      if (this.frustum.intersectsBox(box)) hits.push(obj.userData.id as number);
+    }
+    return hits;
+  }
+
+  /**
+   * `mainGroup` 局部坐标 → 屏幕归一化坐标。选框起点按世界坐标记，每帧用它投回屏幕，
+   * 镜头动了（缩放、低头）选框也跟着桌面走。`project()` 走的正是渲染用的视图矩阵
+   */
+  project(p: Vector3, camera: Camera): Vector2 {
+    const v = this.mainGroup.localToWorld(p.clone()).project(camera);
+    return new Vector2(v.x, v.y);
   }
 
   /**

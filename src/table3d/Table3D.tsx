@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2 } from "three";
+import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2, Vector3 } from "three";
 import { Size, ThingType } from "./types";
 import { api, ApiError, type MatchConfig } from "../api";
 import { AssetLoader } from "./asset-loader";
@@ -73,13 +73,16 @@ function describeFailure(e: unknown): string {
  */
 export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
+  /** 框选的选框。DOM 覆盖层而不是 3D 对象（研究笔记 §4.3：恒定面向屏幕的 UI 一律用 DOM） */
+  const selectionRef = useRef<HTMLDivElement>(null);
   /** 出错了显示什么；`retry` 有值时给一个「重试」按钮（资源加载失败时没有，重试也没用） */
   const [failure, setFailure] = useState<{ message: string; retry?: () => void } | null>(null);
   const [wallLeft, setWallLeft] = useState<number | null>(null);
 
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount) return;
+    const selectionEl = selectionRef.current;
+    if (!mount || !selectionEl) return;
 
     // 世界坐标那一层。桌面和牌都挂这里，永不旋转（换座位转的是相机组）
     const mainGroup = new Group();
@@ -126,17 +129,76 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     const onMouseLeave = () => {
       hasMouse = false;
     };
-    // 在悬停的牌上按下 → 拿起。拖动平面抬到那张牌的顶面（研究笔记 §4.2）
+    // ---- T3.3 框选 ----
+    /** 选框起点，按桌面（z=0）上的世界坐标记，每帧重新投影——镜头动了选框也跟着桌面走 */
+    let selectStart3: Vector3 | null = null;
+    /** 按下时的屏幕位置。挪过几个像素才算「拖了」，否则就是单击 */
+    let selectDown: { x: number; y: number } | null = null;
+    let selectMoved = false;
+
+    const endSelection = () => {
+      selectStart3 = null;
+      selectDown = null;
+      selectMoved = false;
+      selectionEl.style.visibility = "hidden";
+    };
+
+    // 在悬停的牌上按下 → 拿起（T3.2）。拖动平面抬到那张牌的顶面（研究笔记 §4.2）。
+    // 在空白处按下 → 开始框选（T3.3）
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0 || !tableView || !mouseUi || !hasMouse) return;
-      const z = tableView.dragZ;
-      if (z === null) return;
-      const p = mouseUi.raycastLevel(mouse2, view.camera, z);
-      if (p && tableView.dragStart(p)) e.preventDefault(); // 别拖出文字选区
+      if (tableView.hoveredThing !== null) {
+        const z = tableView.dragZ;
+        if (z === null) return;
+        const p = mouseUi.raycastLevel(mouse2, view.camera, z);
+        if (p && tableView.dragStart(p)) e.preventDefault(); // 别拖出文字选区
+        return;
+      }
+      const p = mouseUi.raycastLevel(mouse2, view.camera, 0);
+      if (!p) return;
+      selectStart3 = p;
+      selectDown = { x: e.clientX, y: e.clientY };
+      selectMoved = false;
+      tableView.setHovered(null); // 框选过程中不显示悬停
+      e.preventDefault();
     };
     // 松开挂在 window 上：拖出画布再松手也得收得到
     const onMouseUp = (e: MouseEvent) => {
-      if (e.button === 0) tableView?.dragEnd();
+      if (e.button !== 0) return;
+      if (selectStart3) {
+        // 单击空白处（没拖动）= 清空选中
+        if (!selectMoved) tableView?.clearSelection();
+        endSelection();
+        return;
+      }
+      tableView?.dragEnd();
+    };
+    const onWindowMouseMove = (e: MouseEvent) => {
+      if (selectDown && !selectMoved) {
+        selectMoved = Math.hypot(e.clientX - selectDown.x, e.clientY - selectDown.y) > 3;
+      }
+    };
+
+    /** 每帧：选框投回屏幕、画 DOM 矩形、算框中了哪几张 */
+    const updateSelection = () => {
+      if (!selectStart3 || !tableView || !mouseUi) return;
+      if (!selectMoved) return;
+      mouseUi.updateObjects(tableView.pickables);
+      const start2 = mouseUi.project(selectStart3, view.camera);
+      tableView.setSelected(mouseUi.select(start2, mouse2, view.camera));
+
+      const rect = view.canvas.getBoundingClientRect();
+      const toX = (x: number) => rect.left + ((x + 1) / 2) * rect.width;
+      const toY = (y: number) => rect.top + ((1 - y) / 2) * rect.height;
+      const x1 = toX(Math.min(start2.x, mouse2.x));
+      const x2 = toX(Math.max(start2.x, mouse2.x));
+      const y1 = toY(Math.max(start2.y, mouse2.y));
+      const y2 = toY(Math.min(start2.y, mouse2.y));
+      selectionEl.style.left = `${x1}px`;
+      selectionEl.style.top = `${y1}px`;
+      selectionEl.style.width = `${x2 - x1}px`;
+      selectionEl.style.height = `${y2 - y1}px`;
+      selectionEl.style.visibility = "visible";
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -172,8 +234,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     };
     // 切到别的标签页再回来，keyup 收不到，键会卡住
     const onBlur = () => {
-      // 切走时 mouseup 也收不到：手上的牌放回原位
+      // 切走时 mouseup 也收不到：手上的牌放回原位，框选也放弃（已选中的保留）
       tableView?.cancelDrag();
+      endSelection();
       keys.clear();
       lookDown.start(0);
       zoom.start(0);
@@ -183,11 +246,13 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     mount.addEventListener("mouseleave", onMouseLeave);
     mount.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("mousemove", onWindowMouseMove);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
 
     // 牌和拾取都要等资源加载完才有，mainLoop 在那之前只画空桌
+    let objectView: ObjectView | null = null;
     let tableView: TableView | null = null;
     let mouseUi: MouseUi | null = null;
 
@@ -203,7 +268,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       if (tableView && mouseUi) {
         // 每帧都拾取，不只在 mousemove 时：低头、缩放会让同一个鼠标位置指到别的牌。
         // 相机也每帧现取——按 p 切透视时 main-view 会换掉相机对象
-        if (tableView.dragging) {
+        if (selectStart3) {
+          updateSelection();
+        } else if (tableView.dragging) {
           // 拖动中只信平面（研究笔记 §4.2）。鼠标出了画布就停在最后的位置
           const p = hasMouse ? mouseUi.raycastLevel(mouse2, view.camera, tableView.dragZ!) : null;
           tableView.dragMove(p);
@@ -212,6 +279,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           tableView.setHovered(hasMouse ? mouseUi.pick(mouse2, view.camera) : null);
         }
         tableView.update(performance.now());
+        // 选中的牌描金边。objectView.selectedObjects 每次提交都会重填，交同一个数组即可
+        if (objectView) view.updateOutline(objectView.selectedObjects);
       }
       view.render();
     };
@@ -222,7 +291,6 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     // 全是异步的，而组件随时可能被卸载（点「返回」）。`alive` 是唯一的护栏：
     // 每个 await 之后都要看一眼，否则会往已经 dispose 掉的场景里写东西。
     let alive = true;
-    let objectView: ObjectView | null = null;
 
     (async () => {
       const assetLoader = new AssetLoader();
@@ -267,6 +335,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       mount.removeEventListener("mouseleave", onMouseLeave);
       mount.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("mousemove", onWindowMouseMove);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
@@ -283,6 +352,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       <div className="table3d-stage">
         <div className="table3d-canvas" ref={mountRef} />
       </div>
+      <div className="table3d-selection" ref={selectionRef} />
       <button className="table3d-back" onClick={onBack}>
         ← 返回
       </button>
@@ -301,7 +371,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           ? failure
             ? ""
             : "发牌中…"
-          : `牌墙剩 ${wallLeft} 张 · 空格 低头 · z / x 缩放 · p 切透视`}
+          : `牌墙剩 ${wallLeft} 张 · 空格 低头 · z / x 缩放 · p 切透视 · 拖空白处框选`}
       </div>
     </div>
   );

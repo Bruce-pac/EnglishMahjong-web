@@ -1807,6 +1807,15 @@ button.footer-link {
 }
 /* 尺寸由 MainView.updateViewport 写死在 style 上，这里不要设 width/height。
    canvas 用 block 免得行内元素底部留白导致每帧 resize 抖动 */
+/* T3.3 框选的选框。position: fixed，坐标由 Table3D 每帧按画布位置算好直接写 */
+.table3d-selection {
+  position: fixed;
+  visibility: hidden;
+  pointer-events: none;
+  border: 1px solid #ffff99;
+  background: rgba(255, 255, 153, 0.12);
+  z-index: 5;
+}
 .table3d-canvas canvas {
   display: block;
 }

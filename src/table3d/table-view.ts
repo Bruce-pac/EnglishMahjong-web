@@ -17,6 +17,7 @@
  * - T3.1 悬停（`setHovered`）：不改局面，只让那张牌换到 Custom 轨道去发光
  * - T3.2 拖放重排（`dragStart / dragMove / dragEnd`）：纯本地、不上报服务端（D3），
  *   松手后写回 A 层的 `LooseSlots` 并存档，再走一遍正常的 layout → 分配 → 提交
+ * - T3.3 框选（`setSelected`）：选中按 tileId 记，走 Custom 轨道交给 OutlinePass 描金边
  * 组词 T4.x、动画 T5.x 还没接。
  */
 
@@ -90,6 +91,11 @@ export class TableView {
   private pickTargets: PickTarget[] = [];
   /** 鼠标指着的 Thing 编号 */
   private hovered: number | null = null;
+  /**
+   * 框选选中的牌，**按 tileId 记，不按 Thing 编号记**：对账时同字母的两张牌可能
+   * 对调实例，tileId 才是牌的身份。牌离开散牌区就从这里去掉（见 commit）
+   */
+  private selectedTiles = new Set<number>();
 
   /** 最近一次的 envelope。拖放落下后要拿它的 state 重新 layout、判断要不要存档 */
   private lastEnv: Envelope | null = null;
@@ -287,9 +293,12 @@ export class TableView {
 
     // 悬停的那张被这次 envelope 挪出了散牌区（打出去、亮出去）就不再算悬停
     if (!pickTargets.some((t) => t.id === this.hovered)) this.hovered = null;
-    for (const r of renders) r.hovered = r.thingIndex === this.hovered;
+    // 选中的牌同理：已经不在散牌区的 tileId 去掉，还在的保持选中
+    const live = new Set(this.loose.flatMap((e) => (e ? [e.tileId] : [])));
+    for (const id of this.selectedTiles) if (!live.has(id)) this.selectedTiles.delete(id);
     this.renders = renders;
     this.pickTargets = pickTargets;
+    this.refreshFlags();
 
     this.objectView.updateThings(renders);
     // 剩下的实例这一帧没牌可演，藏起来——不藏的话它们会顶着单位矩阵堆在原点
@@ -328,6 +337,8 @@ export class TableView {
   /** 在悬停的牌上按下 → 拿起。没指着牌返回 false */
   dragStart(mouse3: Vector3): boolean {
     if (this.held || this.hovered === null) return false;
+    // 拖一张牌时先清空选中（整组拖动是 T4.3）
+    this.clearSelection();
     this.held = this.things[this.hovered]!;
     this.setHovered(null);
     this.heldMouse = mouse3.clone();
@@ -503,9 +514,56 @@ export class TableView {
     const next = index !== null && this.pickTargets.some((t) => t.id === index) ? index : null;
     if (next === this.hovered) return false;
     this.hovered = next;
-    for (const r of this.renders) r.hovered = r.thingIndex === next;
+    this.refreshFlags();
     this.objectView.updateThings(this.renders);
     return true;
+  }
+
+  /** 把悬停 / 选中两个标志按当前状态写进上一批 Render */
+  private refreshFlags(): void {
+    for (const r of this.renders) {
+      r.hovered = r.thingIndex === this.hovered;
+      const tileId = this.tileIdOf(r.thingIndex);
+      r.selected = tileId !== null && this.selectedTiles.has(tileId);
+    }
+  }
+
+  /** 这张牌（Thing 编号）的 tileId。不在自己散牌区返回 null */
+  private tileIdOf(thingIndex: number): number | null {
+    const slot = this.things[thingIndex]?.slot;
+    if (!slot || slot.group !== "loose" || slot.seat !== this.mySeat) return null;
+    return this.loose[slot.indexes[0]]?.tileId ?? null;
+  }
+
+  /**
+   * 设置框选结果（T3.3）。`thingIds` 是 `MouseUi.select` 给的 Thing 编号，
+   * 这里换成 tileId 记下。不可拾取的编号忽略。集合没变就不重新提交。
+   *
+   * @returns 这次有没有重新提交
+   */
+  setSelected(thingIds: readonly number[]): boolean {
+    const next = new Set<number>();
+    for (const i of thingIds) {
+      if (!this.pickTargets.some((t) => t.id === i)) continue;
+      const tileId = this.tileIdOf(i);
+      if (tileId !== null) next.add(tileId);
+    }
+    if (next.size === this.selectedTiles.size && [...next].every((id) => this.selectedTiles.has(id))) {
+      return false;
+    }
+    this.selectedTiles = next;
+    this.refreshFlags();
+    this.objectView.updateThings(this.renders);
+    return true;
+  }
+
+  clearSelection(): void {
+    this.setSelected([]);
+  }
+
+  /** 选中的 tileId，**按槽位从左到右**。T4.1 按这个顺序拼单词 */
+  selectedTileIds(): number[] {
+    return this.loose.flatMap((e) => (e && this.selectedTiles.has(e.tileId) ? [e.tileId] : []));
   }
 
   get hoveredThing(): number | null {
