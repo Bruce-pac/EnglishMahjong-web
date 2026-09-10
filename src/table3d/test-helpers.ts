@@ -86,7 +86,7 @@ export function slotOf(slots: LooseSlots): Map<number, number> {
  *
  * 1. 没有牌往右跑
  * 2. 相对顺序不变
- * 3. **动了的牌构成一个后缀**：某张牌没动，它右边就不许有牌动
+ * 3. **动了的牌构成一个后缀**：某张牌动了，它右边的牌也都得动（某张牌没动，它左边就不许有牌动）
  *
  * 返回 null 表示通过，否则返回人话的失败原因。
  */
@@ -104,7 +104,7 @@ export function suffixShiftError(
     if (s.to > s.from) return `tileId ${s.id} 往右跑了（${s.from} → ${s.to}）`;
     if (s.to < s.from) movedSeen = true;
     else if (movedSeen) {
-      return `tileId ${s.id} 在 ${s.from} 没动，但它右边有牌动了——动的必须是一个后缀`;
+      return `tileId ${s.id} 在 ${s.from} 没动，但它左边有牌动了——动的必须是最右边的一截（后缀）`;
     }
   }
   for (let i = 1; i < survivors.length; i++) {
