@@ -213,18 +213,35 @@ export class MainView {
     if (fromTop) {
       this.camera.position.set(0, 0, 100);
       this.camera.rotation.set(0, 0, 0);
-      this.camera.scale.setScalar(1.55);
+      this.setOrthoZoom(1 / 1.55);
       return;
     }
-    // 正交相机没有「离得近就大」，所以缩放是改 scale 而不是改 position.z
+    // 正交相机没有「离得近就大」，缩放改的是 camera.zoom，不是 position.z
     this.camera.position.set(0, -53 * lookDown - WORLD_SIZE, WORLD_SIZE);
     this.camera.rotation.set(Math.PI * 0.25, 0, 0);
-    this.camera.scale.setScalar(1 - 0.45 * zoom);
+    this.setOrthoZoom(1 / (1 - 0.45 * zoom));
 
     if (zoom > 0 && mouse2) {
       this.camera.position.x += mouse2.x * zoom * WORLD_SIZE * 0.6;
       this.camera.position.y += mouse2.y * zoom * WORLD_SIZE * 0.6;
     }
+  }
+
+  /**
+   * 正交相机的缩放走 `camera.zoom`，**不走 `camera.scale`**。
+   *
+   * Autotable 用 `scale.setScalar()` 做缩放和俯视，那是老版本 three 的行为。
+   * three r185 的 `Camera.updateMatrixWorld` 会把 scale 从视图矩阵里剔掉
+   * （注释是 "exclude scale from view matrix to be glTF conform"），scale 设了等于没设。
+   * T1.3 起正交模式按 z 只会平移、不会放大，俯视的 1.55 也不生效，就是这个原因。
+   *
+   * 换算：Autotable 的 scale 放大的是视野（越大看到的越多），zoom 正好相反，所以取倒数。
+   */
+  private setOrthoZoom(value: number): void {
+    const camera = this.camera as OrthographicCamera;
+    if (camera.zoom === value) return;
+    camera.zoom = value;
+    camera.updateProjectionMatrix();
   }
 
   /** 要描金边的 mesh。T3.3 框选、T4.3 暗词组都往这里塞 */

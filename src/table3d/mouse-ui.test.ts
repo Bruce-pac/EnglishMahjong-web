@@ -23,35 +23,49 @@ function envelopeOf(state: State): Envelope {
 /**
  * 照 main-view.ts 摆相机：相机挂在绕桌心的 viewGroup 里，座位 0。
  *
- * `top` 和 `orthoZoom` 带 scale，专门守 three r185 的那个坑：视图矩阵不含 scale，
- * `setFromCamera` 却含——测试里的 `project()` 走的是和渲染一样的视图矩阵。
+ * 正交相机的缩放和 main-view 一样走 `camera.zoom`（俯视 1/1.55、放大到头 1/0.55）。
+ *
+ * `scaleGuard` 专门守 three r185 的那个坑：视图矩阵不含 scale，`setFromCamera` 却含。
+ * main-view 已经不设 scale 了，但拾取仍按渲染用的视图矩阵反投影，这台相机保证
+ * 以后谁再给相机设 scale，指着的牌和高亮的牌也不会错开。
  */
 function cameras(): Record<string, Camera> {
-  const make = (camera: Camera, pos: Vector3, rotX: number, scale = 1) => {
+  const make = (camera: Camera, pos: Vector3, rotX: number, opts: { zoom?: number; scale?: number } = {}) => {
     const viewGroup = new Group();
     viewGroup.position.set(WORLD_SIZE / 2, WORLD_SIZE / 2, 0);
     viewGroup.add(camera);
     camera.position.copy(pos);
     camera.rotation.set(rotX, 0, 0);
-    camera.scale.setScalar(scale);
+    camera.scale.setScalar(opts.scale ?? 1);
+    if (camera instanceof OrthographicCamera && opts.zoom !== undefined) {
+      camera.zoom = opts.zoom;
+      camera.updateProjectionMatrix();
+    }
     viewGroup.updateMatrixWorld(true);
     return camera;
   };
   const w = WORLD_SIZE * 1.2;
   const h = w / 1.5;
   return {
-    top: make(new OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.1, 1000), new Vector3(0, 0, 100), 0, 1.55),
+    top: make(new OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.1, 1000), new Vector3(0, 0, 100), 0, { zoom: 1 / 1.55 }),
     ortho: make(
       new OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.1, 1000),
       new Vector3(0, -WORLD_SIZE, WORLD_SIZE),
       Math.PI * 0.25,
     ),
-    // 按住 z 放大到头、鼠标在右上：scale 0.55，镜头往右上平移
+    // 按住 z 放大到头、鼠标在右上：zoom 1/0.55，镜头往右上平移
     orthoZoom: make(
       new OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.1, 1000),
       new Vector3(0.3 * WORLD_SIZE * 0.6, -WORLD_SIZE + -0.4 * WORLD_SIZE * 0.6, WORLD_SIZE),
       Math.PI * 0.25,
-      0.55,
+      { zoom: 1 / 0.55 },
+    ),
+    // 回归防线：相机带 scale 时，拾取仍要和渲染（剔除 scale 的视图矩阵）一致
+    scaleGuard: make(
+      new OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.1, 1000),
+      new Vector3(0, -WORLD_SIZE, WORLD_SIZE),
+      Math.PI * 0.25,
+      { scale: 0.55 },
     ),
     // 按住空格低头
     orthoLookDown: make(

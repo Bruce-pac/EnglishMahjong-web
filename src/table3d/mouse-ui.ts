@@ -125,10 +125,11 @@ export class MouseUi {
    * three r185 算视图矩阵时把相机的 scale 剔掉了（`Camera.updateMatrixWorld`，注释是
    * 「exclude scale from view matrix to be glTF conform」），渲染用的就是这个
    * `matrixWorldInverse`；而 `setFromCamera` 反投影走的是带 scale 的 `matrixWorld`。
-   * main-view 的正交相机恰好靠 scale 做俯视（1.55）和缩放（1 - 0.45·zoom），
-   * 两边一不一致，指着的牌和高亮的牌就差出 scale 倍。
+   * 两边一旦不一致，指着的牌和高亮的牌就差出 scale 倍。
    *
-   * 所以这里统一用 `matrixWorldInverse` 的逆——画面怎么投影的，射线就怎么反投影回去。
+   * main-view 现在已经改用 `camera.zoom` 缩放、不再给相机设 scale，但这里仍然坚持用
+   * `matrixWorldInverse` 的逆——画面怎么投影的，射线就怎么反投影回去。
+   * 以后谁再给相机设 scale，拾取也不会跟画面错开（测试里的 scaleGuard 守着这一点）。
    */
   private setRay(mouse2: Vector2, camera: Camera): void {
     const toWorld = this.viewToWorld.copy(camera.matrixWorldInverse).invert();

@@ -12,6 +12,9 @@ import { ThingParams, TileThingGroup } from "./thing-group";
 import { Place } from "./types";
 
 /** 一张牌这一帧要怎么画 */
+/** 悬停时牌面自发光的强度（0..1）。调这里就能调悬停高亮的明显程度 */
+const HOVER_GLOW = 0.2;
+
 export interface Render {
   thingIndex: number;
   place: Place;
@@ -149,7 +152,9 @@ export class ObjectView {
       material.depthTest = true;
       obj.renderOrder = 0;
 
-      if (thing.hovered) material.emissive.setRGB(0.05, 0.05, 0.05);
+      // Autotable 用 0.05，但我们的环境光是 1.45、牌面本来就很亮，0.05 只亮了 18/255，
+      // 肉眼几乎看不出来。悬停要一眼可见；选中另有金色描边（OutlinePass），两者不会混
+      if (thing.hovered) material.emissive.setRGB(HOVER_GLOW, HOVER_GLOW, HOVER_GLOW);
       if (thing.bottom) material.color.setRGB(0.8, 0.8, 0.8);
       if (thing.selected) this.selectedObjects.push(obj);
       if (thing.held) {
