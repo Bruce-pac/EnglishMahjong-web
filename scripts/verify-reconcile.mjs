@@ -20,6 +20,9 @@ const MAX_GAMES_PER_MATCH = 16;
 const m = await import("../src/table3d/loose-reconcile.ts");
 const p = await import("../src/table3d/placement.ts");
 const a = await import("../src/table3d/thing-assign.ts");
+// 不变式 3 的判定与单元测试共用同一份，不在脚本里另写一套——
+// T2.1 改过一次规则（摸牌从右端加、右端满了从右往里挤空隙），两处各写一份就是这样漏掉的
+const { suffixShiftError } = await import("../src/table3d/test-helpers.ts");
 
 const DECK_SIZE = 108;
 let playerId = null;
@@ -105,9 +108,8 @@ for (let round = 0; games < GAMES; round++) {
     r = m.reconcileLoose(state.me, withLocal, r.nextTileId);
 
     if (!r.rebuilt) {
-      for (const [id, at] of slotOf(r.slots)) {
-        if (before.has(id) && at !== before.get(id)) fail(`不变式3：局${round}步${step} tile ${id} 被挪了`);
-      }
+      const bad = suffixShiftError(before, slotOf(r.slots));
+      if (bad) fail(`不变式3：局${round}步${step} ${bad}`);
       for (const [id, w] of wildOf(r.slots)) {
         if (wildBefore.has(id) && w !== wildBefore.get(id))
           fail(`不变式4：局${round}步${step} tile ${id} 白搭声明串了`);
