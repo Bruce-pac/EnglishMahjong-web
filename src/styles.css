@@ -1833,6 +1833,37 @@ button.footer-link {
   font-size: 13px;
   cursor: pointer;
 }
+/* 3D 页拉牌局失败时的提示条。与 .table3d-hint 不同，它要接收点击（「重试」） */
+.table3d-error {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 180, 160, 0.5);
+  border-radius: 8px;
+  background: rgba(40, 10, 10, 0.75);
+  color: #ffd9cf;
+  font-size: 13px;
+}
+
+.table3d-retry {
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.table3d-retry:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
 .table3d-back:hover {
   border-color: var(--gold);
   color: var(--gold);

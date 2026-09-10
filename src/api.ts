@@ -220,6 +220,24 @@ async function playerId(): Promise<string> {
   return pending;
 }
 
+/**
+ * 服务端回了非 2xx。`status` 是 HTTP 状态码，调用方靠它区分「牌局已经不存在」（404）
+ * 与「这次没成功、稍后可以再试」（429 限流、500 等）。
+ *
+ * **`message` 与改之前一字不差**（服务端的 `detail`）——2.5D 的 `useGame` 只拿
+ * `e.message` 显示错误，它完全不受影响。网络断开时 `fetch` 自己抛 TypeError，
+ * 那种情况根本拿不到响应，也就没有 ApiError、没有 status。
+ */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function request<T>(
   url: string,
   init: RequestInit = {},
@@ -241,7 +259,7 @@ async function request<T>(
     });
   }
   const data = await res.json();
-  if (!res.ok) throw new Error(data.detail ?? "请求失败");
+  if (!res.ok) throw new ApiError(data.detail ?? "请求失败", res.status);
   return data as T;
 }
 

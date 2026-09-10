@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2 } from "three";
 import { Size, ThingType } from "./types";
-import { api, type Envelope, type MatchConfig } from "../api";
+import { api, ApiError, type MatchConfig } from "../api";
 import { AssetLoader } from "./asset-loader";
 import { WORLD_SIZE } from "./layout";
 import { MainView } from "./main-view";
 import { ObjectView } from "./object-view";
+import { openMatch } from "./open-match";
 import * as persist from "./persist";
 import { TableView } from "./table-view";
 import { Animation } from "./utils";
@@ -42,6 +43,23 @@ function writeMatchId(matchId: string): void {
 }
 
 /**
+ * 把拉 envelope 时的错误翻成人话。
+ *
+ * 断网时 `fetch` 自己抛 TypeError、响应不是 JSON 时抛 SyntaxError——这两种都拿不到
+ * ApiError，原文是「Failed to fetch」「Unexpected end of JSON input」，玩家看不懂；
+ * 其余错误用服务端给的 detail。
+ * 失败时**存档是保留着的**，所以要告诉玩家「可以重试」，而不是让他以为牌丢了。
+ */
+function describeFailure(e: unknown): string {
+  if (e instanceof ApiError) return `恢复牌局失败：${e.message}（牌局和手牌顺序都还在，可以重试）`;
+  if (e instanceof TypeError) return "连不上服务器（牌局和手牌顺序都还在，可以重试）";
+  // 后端停着时，Vite 代理回的是空 body 的 5xx，`res.json()` 在构造 ApiError 之前就先抛了
+  // SyntaxError。不在 `request()` 里改——那会改变 2.5D 在同一场景下看到的文案
+  if (e instanceof SyntaxError) return "服务器没有正常响应（牌局和手牌顺序都还在，可以重试）";
+  return `出错了：${e instanceof Error ? e.message : String(e)}`;
+}
+
+/**
  * 3D 牌桌页。
  *
  * 这里是**裸 three.js**，不用 @react-three/fiber：React 只负责挂一个容器 div 和
@@ -53,7 +71,8 @@ function writeMatchId(matchId: string): void {
  */
 export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** 出错了显示什么；`retry` 有值时给一个「重试」按钮（资源加载失败时没有，重试也没用） */
+  const [failure, setFailure] = useState<{ message: string; retry?: () => void } | null>(null);
   const [wallLeft, setWallLeft] = useState<number | null>(null);
 
   useEffect(() => {
@@ -178,29 +197,30 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       objectView = new ObjectView(mainGroup, assetLoader);
       const tableView = new TableView(objectView);
 
-      // 刷新回来时优先接管原来那局（散牌区顺序存在 localStorage 里，靠 matchId 找）
-      const saved = readMatchId();
-      let env: Envelope;
-      if (saved) {
+      // 拉 envelope：刷新回来时优先接管原来那局（散牌区顺序存在 localStorage 里，
+      // 靠 matchId 找）。**只有 404 才清存档、开新局**，其余错误保留存档、显示出来、
+      // 给「重试」——判断在 open-match.ts，那里有单测钉着。
+      // 重试只重跑这一段，资源和场景不用重建。
+      const loadMatch = async () => {
+        setFailure(null);
         try {
-          env = await api.resume(saved);
-        } catch {
-          // 牌局只存内存，服务器重启就没了（DESIGN.md §3 的有意取舍）。
-          // 存档跟着清掉，然后当作新局开一把
-          persist.clear(saved);
+          const env = await openMatch(readMatchId(), DEFAULT_CONFIG, {
+            resume: api.resume,
+            newMatch: api.newMatch,
+            clearSave: persist.clear,
+          });
           if (!alive) return;
-          env = await api.newMatch(DEFAULT_CONFIG);
+          writeMatchId(env.matchId);
+          tableView.apply(env);
+          setWallLeft(env.state.wallLeft);
+        } catch (e) {
+          if (alive) setFailure({ message: describeFailure(e), retry: () => void loadMatch() });
         }
-      } else {
-        env = await api.newMatch(DEFAULT_CONFIG);
-      }
-      if (!alive) return;
-
-      writeMatchId(env.matchId);
-      tableView.apply(env);
-      setWallLeft(env.state.wallLeft);
+      };
+      await loadMatch();
     })().catch((e) => {
-      if (alive) setError(e instanceof Error ? e.message : "开局失败");
+      // 走到这里的是资源加载失败（图集 / 模型）。牌局相关的错误在 loadMatch 里接住了
+      if (alive) setFailure({ message: e instanceof Error ? e.message : "加载失败" });
     });
 
     return () => {
@@ -226,8 +246,22 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       <button className="table3d-back" onClick={onBack}>
         ← 返回
       </button>
+      {failure && (
+        <div className="table3d-error" role="alert">
+          <span>{failure.message}</span>
+          {failure.retry && (
+            <button className="table3d-retry" onClick={failure.retry}>
+              重试
+            </button>
+          )}
+        </div>
+      )}
       <div className="table3d-hint">
-        {error ?? (wallLeft === null ? "发牌中…" : `牌墙剩 ${wallLeft} 张 · 空格 低头 · z / x 缩放 · p 切透视`)}
+        {wallLeft === null
+          ? failure
+            ? ""
+            : "发牌中…"
+          : `牌墙剩 ${wallLeft} 张 · 空格 低头 · z / x 缩放 · p 切透视`}
       </div>
     </div>
   );
