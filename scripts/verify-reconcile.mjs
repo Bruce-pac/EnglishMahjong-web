@@ -60,6 +60,11 @@ function localOps(slots, rand) {
       Math.floor(rand() * next.length),
     );
   }
+  // T3.2 的插入让位。非法落点返回 null，就当玩家松手后牌回了原位
+  for (let k = 0; k < 2; k++) {
+    const from = filled[Math.floor(rand() * filled.length)];
+    next = m.insertLoose(next, from, Math.floor(rand() * next.length)) ?? next;
+  }
   for (const e of next.filter((x) => x && (x.tile === "1" || x.tile === "2"))) {
     if (rand() < 0.5) continue;
     const pool = e.tile === "1" ? VOWELS : CONSONANTS;

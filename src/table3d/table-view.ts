@@ -13,19 +13,24 @@
  * 它读的是上一帧**已提交**的 `Thing.typeIndex`。顺序反了，轮 ① / ② 的比较全部
  * 退化成自比自，三轮匹配等于没做。所以本文件里 `commit()` 的步骤次序不能调换。
  *
- * 局面本身**只读**：服务端说什么就画什么，不含任何规则逻辑。唯一的本地交互状态是
- * T3.1 的悬停（`setHovered`）——它不改局面，只让那张牌换到 Custom 轨道去发光。
+ * 局面本身**只读**：服务端说什么就画什么，不含任何规则逻辑。本地交互只有两样：
+ * - T3.1 悬停（`setHovered`）：不改局面，只让那张牌换到 Custom 轨道去发光
+ * - T3.2 拖放重排（`dragStart / dragMove / dragEnd`）：纯本地、不上报服务端（D3），
+ *   松手后写回 A 层的 `LooseSlots` 并存档，再走一遍正常的 layout → 分配 → 提交
  * 组词 T4.x、动画 T5.x 还没接。
  */
 
+import { Vector3 } from "three";
 import type { Envelope } from "../api";
 import { TILE_COUNT } from "./layout";
 import {
+  insertLoose,
   rebuildLoose,
   reconcileLoose,
   type LooseSlots,
 } from "./loose-reconcile";
 import type { PickTarget } from "./mouse-ui";
+import { findSlot, Movement } from "./movement";
 import type { ObjectView, Render } from "./object-view";
 import { assignThings } from "./thing-assign";
 import { layout, type DisplayState, type Placement } from "./placement";
@@ -34,6 +39,16 @@ import { makeSlots } from "./setup-slots";
 import type { Slot } from "./slot";
 import { Thing } from "./thing";
 import { ThingType } from "./types";
+
+/** 被挤开 / 落下的牌滑过去用多久（Autotable 的 SHIFT_TIME）。完整动画层是 T5.1 */
+export const SHIFT_TIME = 100;
+
+/** 一段滑动：从哪到哪、什么时候开始 */
+interface Slide {
+  from: Vector3;
+  to: Vector3;
+  start: number;
+}
 
 /** Thing 池的全部下标。`assignThings` 每帧都要，建一次就够 */
 const ALL_THINGS = Array.from({ length: TILE_COUNT }, (_, i) => i);
@@ -76,6 +91,22 @@ export class TableView {
   /** 鼠标指着的 Thing 编号 */
   private hovered: number | null = null;
 
+  /** 最近一次的 envelope。拖放落下后要拿它的 state 重新 layout、判断要不要存档 */
+  private lastEnv: Envelope | null = null;
+
+  // ---- T3.2 拖放 ----
+  /** 手里拿着的牌。null = 没在拖 */
+  private held: Thing | null = null;
+  /** 按下时鼠标在拖动平面上的位置；之后的位移都相对它算 */
+  private heldMouse: Vector3 | null = null;
+  private mouse: Vector3 | null = null;
+  /** 这一帧的「谁要去哪」。null = 当前落点不合法（或没沾到任何格子） */
+  private movement: Movement | null = null;
+  /** 正在滑动的牌，按 Thing 编号 */
+  private slides = new Map<number, Slide>();
+  /** 每张牌上一帧**画在哪**。起一段新滑动时从这里出发，不会跳 */
+  private drawn = new Map<number, Vector3>();
+
   constructor(objectView: ObjectView, slots: Map<string, Slot> = makeSlots()) {
     this.objectView = objectView;
     this.slots = slots;
@@ -117,6 +148,9 @@ export class TableView {
    *   永远是空的；T4.x 起才有内容。
    */
   apply(env: Envelope, consumedTileIds: readonly number[] = []): void {
+    // 拖到一半局面变了（将来轮到 AI 出牌时会这样）：先把手上的牌放回原位
+    this.cancelDrag();
+    this.lastEnv = env;
     this.mySeat = env.state.me.seat;
     // ---- A 层：散牌区身份对账 ----
     //
@@ -143,7 +177,12 @@ export class TableView {
         : reconcileLoose(env.state.me, this.loose, this.nextTileId, consumedTileIds);
     this.loose = r.slots;
     this.nextTileId = r.nextTileId;
+    this.saveAndCommit();
+  }
 
+  /** 存档 + B 层摊开 + 提交。envelope 进来和本地拖放落下都走这里 */
+  private saveAndCommit(): void {
+    const env = this.lastEnv!;
     // 结算了就把存档清掉（方案 §6 的第一条时机），否则留着下一局误读
     if (env.matchFinished || env.result !== null) {
       persist.clear(env.matchId);
@@ -259,6 +298,190 @@ export class TableView {
     this.lastSlotName = nextSlotName;
   }
 
+  // ================= T3.2 拖放 =================
+
+  /** 自己散牌区那一排格子。落点只在这里找，落到别处就取消（牌河是 T3.4） */
+  private looseRow(): Slot[] {
+    return [...this.slots.values()].filter((s) => s.group === "loose" && s.seat === this.mySeat);
+  }
+
+  /** 自己散牌区上的牌（可能被挤的就是它们） */
+  private looseThings(): Thing[] {
+    return this.pickTargets.map((t) => this.things[t.id]!);
+  }
+
+  get dragging(): boolean {
+    return this.held !== null;
+  }
+
+  /**
+   * 拖动平面的高度：拿着的牌（或正指着的牌）的**顶面**。鼠标射线在这个高度的平面上
+   * 取点，按下那一刻指着牌面哪儿，拖动全程手指就还捏在牌面那一点上。
+   */
+  get dragZ(): number | null {
+    const thing = this.held ?? (this.hovered !== null ? this.things[this.hovered] : null);
+    if (!thing) return null;
+    const place = thing.place();
+    return place.position.z + place.size.z / 2;
+  }
+
+  /** 在悬停的牌上按下 → 拿起。没指着牌返回 false */
+  dragStart(mouse3: Vector3): boolean {
+    if (this.held || this.hovered === null) return false;
+    this.held = this.things[this.hovered]!;
+    this.setHovered(null);
+    this.heldMouse = mouse3.clone();
+    this.mouse = mouse3.clone();
+    this.movement = null;
+    this.drag();
+    return true;
+  }
+
+  /** 拖动中鼠标动了。null = 鼠标出了画布，停在最后的位置 */
+  dragMove(mouse3: Vector3 | null): void {
+    if (!this.held || mouse3 === null) return;
+    if (this.mouse && this.mouse.equals(mouse3)) return;
+    this.mouse = mouse3.clone();
+    this.drag();
+  }
+
+  /**
+   * 每次鼠标一动就重建一个 Movement（Autotable 的 `world.ts:drag`）。
+   * 只改 Movement 和预览，**不碰 Thing.slot、不碰 LooseSlots**。
+   */
+  private drag(): void {
+    const held = this.held!;
+    const place = held.place();
+    const x = place.position.x + this.mouse!.x - this.heldMouse!.x;
+    const y = place.position.y + this.mouse!.y - this.heldMouse!.y;
+
+    let movement: Movement | null = new Movement();
+    const target = findSlot(this.looseRow(), x, y, place.size.x, place.size.y);
+    if (target === null) {
+      movement = null;
+    } else {
+      movement.move(held, target);
+      if (!movement.findShift(this.looseThings()) || !movement.valid()) movement = null;
+    }
+    this.movement = movement;
+
+    // 被挤开的牌滑到预览位置；不再被挤的滑回去
+    const now = performance.now();
+    for (const thing of this.looseThings()) {
+      if (thing === held) continue;
+      const to = (movement?.shifts().get(thing) ?? thing.slot).place(thing.rotationIndex).position;
+      const cur = this.slides.get(thing.index);
+      if (cur ? !cur.to.equals(to) : !this.drawnAt(thing).equals(to)) this.slideTo(thing, to, now);
+    }
+
+    // 落点影子：合法才画，所见即所得
+    this.objectView.updateDropShadows(movement ? [...movement.slots()].map((s) => s.place(0)) : []);
+  }
+
+  /** 松手。落点合法就写回 LooseSlots；否则（含没挪动）牌回原位 */
+  dragEnd(): void {
+    const held = this.held;
+    if (!held) return;
+    const target = this.movement?.get(held) ?? null;
+    const from = held.slot.indexes[0];
+    const to = target?.indexes[0];
+    const next = target && target !== held.slot ? insertLoose(this.loose, from, to!) : null;
+
+    if (!next) {
+      this.cancelDrag();
+      return;
+    }
+
+    // 落下之前记下每个 tileId 画在哪——提交之后实例可能换人（assignThings 按牌面配对，
+    // 同字母的两张可能对调实例），所以滑动要按 tileId 接，不能按 Thing 接
+    const fromPos = new Map<number, Vector3>();
+    this.loose.forEach((e, i) => {
+      const thing = this.slots.get(`loose.${i}@${this.mySeat}`)?.thing;
+      if (e && thing) fromPos.set(e.tileId, this.drawnAt(thing).clone());
+    });
+
+    this.endDrag();
+    this.loose = next;
+    this.saveAndCommit();
+
+    const now = performance.now();
+    this.slides.clear();
+    this.loose.forEach((e, i) => {
+      const thing = this.slots.get(`loose.${i}@${this.mySeat}`)?.thing;
+      const start = e && fromPos.get(e.tileId);
+      if (!thing || !start) return;
+      this.drawn.set(thing.index, start);
+      this.slideTo(thing, thing.place().position, now);
+    });
+  }
+
+  /** 放弃这次拖动：世界状态本来就没动过，只要把画面滑回原位 */
+  cancelDrag(): void {
+    if (!this.held) return;
+    const now = performance.now();
+    const things = this.looseThings();
+    this.endDrag();
+    for (const thing of things) this.slideTo(thing, thing.place().position, now);
+  }
+
+  private endDrag(): void {
+    this.held = null;
+    this.heldMouse = null;
+    this.mouse = null;
+    this.movement = null;
+    this.objectView.updateDropShadows([]);
+  }
+
+  private drawnAt(thing: Thing): Vector3 {
+    return this.drawn.get(thing.index) ?? thing.place().position;
+  }
+
+  private slideTo(thing: Thing, to: Vector3, now: number): void {
+    this.slides.set(thing.index, { from: this.drawnAt(thing).clone(), to: to.clone(), start: now });
+  }
+
+  /**
+   * 每帧调一次：画拿着的牌和正在滑的牌。**只有拖动中或有滑动时才提交**，
+   * 而且只提交自己散牌区那 ≤18 张——其余的实例矩阵原封不动。
+   */
+  update(now: number): void {
+    if (!this.held && this.slides.size === 0) return;
+
+    const renders: Render[] = [];
+    for (const thing of this.looseThings()) {
+      const place = thing.place();
+      let position = place.position;
+      const held = thing === this.held;
+
+      if (held) {
+        position = place.position.clone();
+        position.x += this.mouse!.x - this.heldMouse!.x;
+        position.y += this.mouse!.y - this.heldMouse!.y;
+      } else {
+        const slide = this.slides.get(thing.index);
+        if (slide) {
+          const t = Math.min(1, (now - slide.start) / SHIFT_TIME);
+          position = slide.from.clone().lerp(slide.to, t);
+          // 预览中的让位滑到了也不能删：它停在预览格上，不是 thing.place()
+          if (t >= 1 && !this.held) this.slides.delete(thing.index);
+        }
+      }
+      this.drawn.set(thing.index, position.clone());
+
+      renders.push({
+        thingIndex: thing.index,
+        place: { ...place, position },
+        selected: false,
+        hovered: false,
+        held,
+        temporary: held && this.movement === null,
+        bottom: false,
+      });
+    }
+    if (!this.held && this.slides.size === 0) this.drawn.clear();
+    this.objectView.updateThings(renders);
+  }
+
   /** 这一帧可拾取的牌（自己散牌区，含暗词）。`MouseUi` 每帧把它写进代理体 */
   get pickables(): readonly PickTarget[] {
     return this.pickTargets;
@@ -275,6 +498,8 @@ export class TableView {
    * @returns 这次有没有重新提交
    */
   setHovered(index: number | null): boolean {
+    // 拖动中不拾取（Autotable 的 toSelect 在拿着牌时返回空）
+    if (this.held && index !== null) return false;
     const next = index !== null && this.pickTargets.some((t) => t.id === index) ? index : null;
     if (next === this.hovered) return false;
     this.hovered = next;

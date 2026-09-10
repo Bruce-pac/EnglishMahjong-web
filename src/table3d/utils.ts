@@ -25,6 +25,26 @@ export function round3(vec: Vector3, factor: number): void {
 }
 
 /**
+ * 两个轴对齐矩形（中心 + 宽高）的重叠面积。拖放落点打分用（研究笔记第四章（中））
+ */
+export function rectangleOverlap(
+  x1: number,
+  y1: number,
+  w1: number,
+  h1: number,
+  x2: number,
+  y2: number,
+  w2: number,
+  h2: number,
+): number {
+  const xa = Math.max(x1 - w1 / 2, x2 - w2 / 2);
+  const xb = Math.min(x1 + w1 / 2, x2 + w2 / 2);
+  const ya = Math.max(y1 - h1 / 2, y2 - h2 / 2);
+  const yb = Math.min(y1 + h1 / 2, y2 + h2 / 2);
+  return Math.max(0, xb - xa) * Math.max(0, yb - ya);
+}
+
+/**
  * 一个 0..1（或 -1..1）之间的缓动量。
  *
  * 相机的三个连续参数（低头、缩放）都由它驱动：按下键 `start(1)`、松开 `start(0)`，

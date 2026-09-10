@@ -271,6 +271,41 @@ export function moveLoose(slots: LooseSlots, from: number, to: number): LooseSlo
   return next;
 }
 
+/**
+ * 本地拖动重排（T3.2）：把 `from` 格的牌**插到** `to` 格，占着 `to` 的牌沿这一排让位。
+ *
+ * 语义与 `movement.ts` 的 `tryShift` 逐格一致（有单测钉着两边对得上）：
+ * `to` 上的牌先试着往左挪，左邻也有牌就一起往左，直到碰到空格（`from` 腾出来的那格
+ * 也算空格）；左边一路满到头就改试往右；两边都走不通返回 null——非法落点，牌回原位。
+ *
+ * - `tileId` 不变，白搭声明挂在 tileId 上跟着走
+ * - 只动 `to` 和它与最近空格之间那一截，**别处的空格一个都不压实**
+ * - `groupId` 原样带着（下一次对账会重新赋值，见 LooseEntry）
+ *
+ * 纯本地、不上报服务端（D3）。
+ */
+export function insertLoose(slots: LooseSlots, from: number, to: number): LooseSlots | null {
+  const n = slots.length;
+  if (from < 0 || to < 0 || from >= n || to >= n || !slots[from]) return null;
+  const next = slots.slice();
+  const moving = next[from];
+  next[from] = null;
+  if (next[to] === null) {
+    next[to] = moving;
+    return next;
+  }
+  // 先左后右，和 Autotable 的 findShiftFor 同一个偏好
+  for (const dir of [-1, 1]) {
+    let empty = to + dir;
+    while (empty >= 0 && empty < n && next[empty] !== null) empty += dir;
+    if (empty < 0 || empty >= n) continue;
+    for (let k = empty; k !== to; k -= dir) next[k] = next[k - dir];
+    next[to] = moving;
+    return next;
+  }
+  return null;
+}
+
 /** 给白搭声明代表的字母（§4.4，随时可改）。声明跟着 tileId 走，不跟着槽位走 */
 export function declareWild(slots: LooseSlots, tileId: number, letter: string): LooseSlots {
   return slots.map((e) => (e && e.tileId === tileId ? { ...e, wildLetter: letter } : e));

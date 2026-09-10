@@ -68,7 +68,8 @@ function describeFailure(e: unknown): string {
  * 组件卸载时必须把循环停掉并 dispose 掉 GPU 资源，否则来回切页会漏显存。
  *
  * 本组件只做三件事：建场景、收键鼠、每帧推进相机动画并渲染。
- * 场景/相机/灯光/后处理都在 `main-view.ts`；牌是 T1.2；拾取在 `mouse-ui.ts`（T3.1），拖放是 T3.2+。
+ * 场景/相机/灯光/后处理都在 `main-view.ts`；牌是 T1.2；拾取在 `mouse-ui.ts`（T3.1）；
+ * 拖放重排的状态在 `table-view.ts`（T3.2），这里只把鼠标按下 / 松开 / 移动喂给它。
  */
 export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -125,6 +126,18 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     const onMouseLeave = () => {
       hasMouse = false;
     };
+    // 在悬停的牌上按下 → 拿起。拖动平面抬到那张牌的顶面（研究笔记 §4.2）
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0 || !tableView || !mouseUi || !hasMouse) return;
+      const z = tableView.dragZ;
+      if (z === null) return;
+      const p = mouseUi.raycastLevel(mouse2, view.camera, z);
+      if (p && tableView.dragStart(p)) e.preventDefault(); // 别拖出文字选区
+    };
+    // 松开挂在 window 上：拖出画布再松手也得收得到
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 0) tableView?.dragEnd();
+    };
 
     const onKeyDown = (e: KeyboardEvent) => {
       // 输入框里打字不该把镜头晃起来（T6.1 的吃牌输入框就是个 input）
@@ -159,6 +172,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     };
     // 切到别的标签页再回来，keyup 收不到，键会卡住
     const onBlur = () => {
+      // 切走时 mouseup 也收不到：手上的牌放回原位
+      tableView?.cancelDrag();
       keys.clear();
       lookDown.start(0);
       zoom.start(0);
@@ -166,6 +181,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
 
     mount.addEventListener("mousemove", onMouseMove);
     mount.addEventListener("mouseleave", onMouseLeave);
+    mount.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
@@ -186,8 +203,15 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       if (tableView && mouseUi) {
         // 每帧都拾取，不只在 mousemove 时：低头、缩放会让同一个鼠标位置指到别的牌。
         // 相机也每帧现取——按 p 切透视时 main-view 会换掉相机对象
-        mouseUi.updateObjects(tableView.pickables);
-        tableView.setHovered(hasMouse ? mouseUi.pick(mouse2, view.camera) : null);
+        if (tableView.dragging) {
+          // 拖动中只信平面（研究笔记 §4.2）。鼠标出了画布就停在最后的位置
+          const p = hasMouse ? mouseUi.raycastLevel(mouse2, view.camera, tableView.dragZ!) : null;
+          tableView.dragMove(p);
+        } else {
+          mouseUi.updateObjects(tableView.pickables);
+          tableView.setHovered(hasMouse ? mouseUi.pick(mouse2, view.camera) : null);
+        }
+        tableView.update(performance.now());
       }
       view.render();
     };
@@ -241,6 +265,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       cancelAnimationFrame(raf);
       mount.removeEventListener("mousemove", onMouseMove);
       mount.removeEventListener("mouseleave", onMouseLeave);
+      mount.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);

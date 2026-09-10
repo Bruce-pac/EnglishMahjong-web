@@ -12,7 +12,7 @@
 
 import type { State } from "../api";
 import fixtures from "./__fixtures__/envelopes.json";
-import { declareWild, moveLoose, type LooseSlots } from "./loose-reconcile";
+import { declareWild, insertLoose, moveLoose, type LooseSlots } from "./loose-reconcile";
 
 export interface FixtureStep {
   state: State;
@@ -57,6 +57,13 @@ export function localOps(slots: LooseSlots, rand: () => number): LooseSlots {
     const a = filled[Math.floor(rand() * filled.length)];
     const b = Math.floor(rand() * next.length);
     next = moveLoose(next, a, b);
+  }
+
+  // 插入让位（T3.2 的拖放）：非法落点返回 null，等于牌回原位
+  const refilled = next.map((e, i) => (e ? i : -1)).filter((i) => i >= 0);
+  for (let k = 0; k < 2 && refilled.length > 0; k++) {
+    const from = refilled[Math.floor(rand() * refilled.length)];
+    next = insertLoose(next, from, Math.floor(rand() * next.length)) ?? next;
   }
 
   // 白搭赋值：随机挑一个还没声明的白搭，给它一个本类字母
