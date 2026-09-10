@@ -13,8 +13,9 @@
  * 它读的是上一帧**已提交**的 `Thing.typeIndex`。顺序反了，轮 ① / ② 的比较全部
  * 退化成自比自，三轮匹配等于没做。所以本文件里 `commit()` 的步骤次序不能调换。
  *
- * 这一版**只读**：把局面画出来，不含任何交互（拾取 T3.x、组词 T4.x、动画 T5.x）。
- * 也不含任何规则逻辑——服务端说什么就画什么。
+ * 局面本身**只读**：服务端说什么就画什么，不含任何规则逻辑。唯一的本地交互状态是
+ * T3.1 的悬停（`setHovered`）——它不改局面，只让那张牌换到 Custom 轨道去发光。
+ * 组词 T4.x、动画 T5.x 还没接。
  */
 
 import type { Envelope } from "../api";
@@ -24,6 +25,7 @@ import {
   reconcileLoose,
   type LooseSlots,
 } from "./loose-reconcile";
+import type { PickTarget } from "./mouse-ui";
 import type { ObjectView, Render } from "./object-view";
 import { assignThings } from "./thing-assign";
 import { layout, type DisplayState, type Placement } from "./placement";
@@ -64,6 +66,15 @@ export class TableView {
 
   private display: DisplayState = { lowercase: false };
   private matchId: string | null = null;
+  /** 自己的座位号。只有这家散牌区的牌能拾取 */
+  private mySeat = 0;
+
+  /** 上一次提交给 ObjectView 的整批 Render。悬停变了就改个标志原样再交一次 */
+  private renders: Render[] = [];
+  /** 这一帧可拾取的牌：自己散牌区（含暗词）。交给 `MouseUi.updateObjects` */
+  private pickTargets: PickTarget[] = [];
+  /** 鼠标指着的 Thing 编号 */
+  private hovered: number | null = null;
 
   constructor(objectView: ObjectView, slots: Map<string, Slot> = makeSlots()) {
     this.objectView = objectView;
@@ -106,6 +117,7 @@ export class TableView {
    *   永远是空的；T4.x 起才有内容。
    */
   apply(env: Envelope, consumedTileIds: readonly number[] = []): void {
+    this.mySeat = env.state.me.seat;
     // ---- A 层：散牌区身份对账 ----
     //
     // 换了一局（或第一次进来）就先看有没有存档：`?match=<id>` 刷新回来时，
@@ -193,6 +205,7 @@ export class TableView {
     for (const thing of this.things) thing?.prepareMove();
 
     const renders: Render[] = [];
+    const pickTargets: PickTarget[] = [];
     const nextSlotName = new Map<number, string>();
     const placed = new Set<number>();
 
@@ -218,11 +231,13 @@ export class TableView {
 
       placed.add(index);
       nextSlotName.set(index, p.slotName);
+      const place = thing.place();
+      if (slot.group === "loose" && slot.seat === this.mySeat) pickTargets.push({ id: index, place });
       renders.push({
         thingIndex: index,
-        place: thing.place(),
-        // T2.1 只读：没有选中、没有悬停、没有拖动，也就没有 Custom 轨的牌——
-        // 全部走 setSimple，整桌合成 1 个 draw call。交互是 T3.x
+        place,
+        // 平时没有选中、没有拖动，只有悬停的那一张走 Custom 轨，其余全部 setSimple、
+        // 整桌合成 1 个 draw call。悬停标志在下面统一补
         selected: false,
         hovered: false,
         held: false,
@@ -231,11 +246,45 @@ export class TableView {
       });
     });
 
+    // 悬停的那张被这次 envelope 挪出了散牌区（打出去、亮出去）就不再算悬停
+    if (!pickTargets.some((t) => t.id === this.hovered)) this.hovered = null;
+    for (const r of renders) r.hovered = r.thingIndex === this.hovered;
+    this.renders = renders;
+    this.pickTargets = pickTargets;
+
     this.objectView.updateThings(renders);
     // 剩下的实例这一帧没牌可演，藏起来——不藏的话它们会顶着单位矩阵堆在原点
     for (const index of ALL_THINGS) if (!placed.has(index)) this.objectView.hideThing(index);
 
     this.lastSlotName = nextSlotName;
+  }
+
+  /** 这一帧可拾取的牌（自己散牌区，含暗词）。`MouseUi` 每帧把它写进代理体 */
+  get pickables(): readonly PickTarget[] {
+    return this.pickTargets;
+  }
+
+  /**
+   * 设置悬停目标（T3.1）。`null` = 没指着任何牌。
+   *
+   * **悬停对象没变就什么都不做**——调用方每帧都会调，不能每帧推 108 张。
+   * 变了才把上次那批 Render 改个标志重新提交：新指着的走 Custom 轨改 emissive，
+   * 离开的那张由 `updateThings` 按 `custom` 标志切回 Simple 轨。
+   * 不可拾取的编号一律当 null 处理。
+   *
+   * @returns 这次有没有重新提交
+   */
+  setHovered(index: number | null): boolean {
+    const next = index !== null && this.pickTargets.some((t) => t.id === index) ? index : null;
+    if (next === this.hovered) return false;
+    this.hovered = next;
+    for (const r of this.renders) r.hovered = r.thingIndex === next;
+    this.objectView.updateThings(this.renders);
+    return true;
+  }
+
+  get hoveredThing(): number | null {
+    return this.hovered;
   }
 
   /** 测试用：读回这一帧每个 Thing 停在哪儿 */

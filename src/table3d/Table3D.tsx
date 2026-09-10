@@ -5,6 +5,7 @@ import { api, ApiError, type MatchConfig } from "../api";
 import { AssetLoader } from "./asset-loader";
 import { WORLD_SIZE } from "./layout";
 import { MainView } from "./main-view";
+import { MouseUi } from "./mouse-ui";
 import { ObjectView } from "./object-view";
 import { openMatch } from "./open-match";
 import * as persist from "./persist";
@@ -67,7 +68,7 @@ function describeFailure(e: unknown): string {
  * 组件卸载时必须把循环停掉并 dispose 掉 GPU 资源，否则来回切页会漏显存。
  *
  * 本组件只做三件事：建场景、收键鼠、每帧推进相机动画并渲染。
- * 场景/相机/灯光/后处理都在 `main-view.ts`；牌是 T1.2；拾取与拖放是 T3.x。
+ * 场景/相机/灯光/后处理都在 `main-view.ts`；牌是 T1.2；拾取在 `mouse-ui.ts`（T3.1），拖放是 T3.2+。
  */
 export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -106,7 +107,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     // 全部由 Animation 驱动，150ms 缓动。瞬切很晕，而且看不出是自己按的
     const lookDown = new Animation(150);
     const zoom = new Animation(150);
-    /** 鼠标在画面里的归一化坐标（-1..1）。放大时相机跟着它平移 */
+    /** 鼠标在画面里的归一化坐标（-1..1）。放大时相机跟着它平移，拾取也用这一份 */
     const mouse2 = new Vector2(0, 0);
     let hasMouse = false;
     /** 已按下的键。按住不放时浏览器会重复触发 keydown，用它去重 */
@@ -169,7 +170,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
 
-    // 自建 mainLoop：每帧推进动画、对齐画布、摆相机、渲染
+    // 牌和拾取都要等资源加载完才有，mainLoop 在那之前只画空桌
+    let tableView: TableView | null = null;
+    let mouseUi: MouseUi | null = null;
+
+    // 自建 mainLoop：每帧推进动画、对齐画布、摆相机、拾取、渲染
     let raf = 0;
     const mainLoop = () => {
       raf = requestAnimationFrame(mainLoop);
@@ -178,6 +183,12 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       view.updateViewport();
       // 单人对局座位恒为 0（需求文档 §1：1 真人 + 3 AI）
       view.updateCamera(0, lookDown.pos, zoom.pos, hasMouse ? mouse2 : null);
+      if (tableView && mouseUi) {
+        // 每帧都拾取，不只在 mousemove 时：低头、缩放会让同一个鼠标位置指到别的牌。
+        // 相机也每帧现取——按 p 切透视时 main-view 会换掉相机对象
+        mouseUi.updateObjects(tableView.pickables);
+        tableView.setHovered(hasMouse ? mouseUi.pick(mouse2, view.camera) : null);
+      }
       view.render();
     };
     mainLoop();
@@ -195,7 +206,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       if (!alive) return;
 
       objectView = new ObjectView(mainGroup, assetLoader);
-      const tableView = new TableView(objectView);
+      const tv = new TableView(objectView);
+      tableView = tv;
+      mouseUi = new MouseUi(mainGroup);
 
       // 拉 envelope：刷新回来时优先接管原来那局（散牌区顺序存在 localStorage 里，
       // 靠 matchId 找）。**只有 404 才清存档、开新局**，其余错误保留存档、显示出来、
@@ -211,7 +224,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           });
           if (!alive) return;
           writeMatchId(env.matchId);
-          tableView.apply(env);
+          tv.apply(env);
           setWallLeft(env.state.wallLeft);
         } catch (e) {
           if (alive) setFailure({ message: describeFailure(e), retry: () => void loadMatch() });
@@ -231,6 +244,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+      mouseUi?.dispose();
       objectView?.dispose();
       tableGeometry.dispose();
       tableMaterial.dispose();
