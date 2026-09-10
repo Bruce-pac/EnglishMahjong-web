@@ -132,18 +132,38 @@ export function rebuildLoose(me: ReconcileMe, nextTileId: number): ReconcileResu
 /**
  * 把新进手的牌摆进散牌区：**一律从右端加**。
  *
- * 右端空格不够时，把已有的牌**整体左移**腾出来。是「整体」，不是「压实」：
- * 相对顺序、以及牌与牌之间的空隙，都原样跟着走。玩家排的是一个图形，
- * 平移不改变这个图形；压实会把他有意留的间隔吃掉（不变式 4 守的就是这个）。
+ * 右端空格不够时**从右往里逐个吃掉空隙**给它让位，规则是一行：
+ *
+ * ```
+ *   q[最右] = p[最右] − 缺的格数
+ *   q[i]    = min(p[i], q[i+1] − 1)      从右往左算
+ * ```
+ *
+ * 读作：**最右那张退到该退的位置，它左边的每一张「能不动就不动」，
+ * 只有被右邻挤到了才跟着退一格。** 于是：
+ *
+ * - 只有右边那一截牌会动，左边的牌一格不动（动的牌永远是一个**后缀**）
+ * - 空隙从右往里被吃掉，够用就停；左边的空隙原样留着
+ * - 两端都有牌、空隙夹在中间时照样腾得出来——整块平移会在这种局面下直接卡死
+ *
+ * 举例（`·` 是空格，缺 1 格时只有 GHIJK 动，缺 4 格时 LM 被 GHIJK 挤得一起动）：
+ *
+ * ```
+ *   [· · A B C D E · L M · · · G H I J K]   摸 1 张
+ *   [· · A B C D E · L M · · G H I J K N]
+ *
+ *   [· · A B C D E · L M · · · G H I J K]   补摸 4 张
+ *   [· · A B C D E L M G H I J K W X Y Z]
+ * ```
  *
  * 为什么不是「找个最近的空格塞进去」：摸到的牌位置要**可预测**。永远在最右端，
  * 玩家不用去找，刚摸的牌也就有了固定的高亮位置（§2 的 `drawn`）。真牌桌上
  * 摸的牌也是搁在右手边的。
  *
- * **这条让不变式 3 从「槽位逐一不变」放宽成「要么不变、要么整体平移同一个量」。**
- * 放宽是有代价的，但仍然可测；不放宽的话「右端加牌」在右端满时无解。
+ * **这条让不变式 3 从「槽位逐一不变」放宽成「动的牌只能是一个后缀、且只能往左」。**
+ * 仍然可测，见 reconcile.test.ts。
  *
- * 返回 null = 摆不下（整排 18 格连空隙都占满了），调用方从零重建。
+ * 返回 null = 连全部压实都摆不下（`牌数 + 新牌 > 18`），调用方从零重建。
  */
 function addAtRight(
   slots: LooseSlots,
@@ -163,16 +183,22 @@ function addAtRight(
     return { slots: out, nextTileId: id };
   }
 
-  const min = filled[0];
   const max = filled[filled.length - 1];
-  // 右端还剩几格；不够的部分就是要往左挪的量
-  const shift = Math.max(0, tiles.length - (LOOSE_SLOTS - 1 - max));
-  // 左移到头也腾不出来：整块牌（含中间空隙）已经铺满整排
-  if (shift > min) return null;
-
+  const need = tiles.length - (LOOSE_SLOTS - 1 - max); // 右端外面还差几格
   const out = emptySlots();
-  for (const i of filled) out[i - shift] = slots[i];
-  tiles.forEach((tile, k) => (out[max - shift + 1 + k] = { tileId: id++, tile }));
+
+  if (need > 0) {
+    const q = new Array<number>(filled.length);
+    q[filled.length - 1] = max - need;
+    for (let i = filled.length - 2; i >= 0; i--) q[i] = Math.min(filled[i], q[i + 1] - 1);
+    if (q[0] < 0) return null; // 全压实也不够，只可能是存档与局面已经对不上
+    filled.forEach((p, i) => (out[q[i]] = slots[p]));
+  } else {
+    filled.forEach((p) => (out[p] = slots[p]));
+  }
+
+  const first = max - Math.max(0, need) + 1;
+  tiles.forEach((tile, k) => (out[first + k] = { tileId: id++, tile }));
   return { slots: out, nextTileId: id };
 }
 

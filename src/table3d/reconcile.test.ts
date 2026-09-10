@@ -16,7 +16,7 @@ import {
 } from "./loose-reconcile";
 import { isValidFace, layout, orderByWord } from "./placement";
 import { assignThings } from "./thing-assign";
-import { fixtureGames, localOps, rng, slotOf, wildOf } from "./test-helpers";
+import { fixtureGames, localOps, rng, slotOf, suffixShiftError, wildOf } from "./test-helpers";
 
 /** 全副牌 108 张（`rules.DECK_SIZE`）。Thing 池就是这么大，**零余量** */
 const DECK_SIZE = 108;
@@ -25,6 +25,20 @@ const me = (hand: string[], groups: Me["groups"] = []): { hand: string[]; groups
   hand,
   groups,
 });
+
+/** `"..ABCDE.LM...GHIJK"` → 18 格散牌区，`.` 是空格。tileId 用下标+1，保证唯一 */
+function slotsFrom(spec: string): LooseSlots {
+  const out: LooseSlots = new Array(LOOSE_SLOTS).fill(null);
+  [...spec].forEach((ch, i) => {
+    if (ch !== ".") out[i] = { tileId: i + 1, tile: ch.toLowerCase() };
+  });
+  return out;
+}
+
+/** 反过来：把散牌区画成一行字，断言失败时一眼看得出差在哪 */
+function show(slots: LooseSlots): string {
+  return slots.map((e) => (e ? e.tile.toUpperCase() : ".")).join("");
+}
 
 describe("A 层：散牌区对账", () => {
   it("比对基是 me.hand 不是 me.loose——组暗词不该让牌从散牌区蒸发", () => {
@@ -66,26 +80,22 @@ describe("A 层：散牌区对账", () => {
     expect(b.slots.slice(0, at).every((e) => e === null)).toBe(true);
   });
 
-  it("右端满了就整体左移腾位置——顺序和空隙都跟着走，不压实", () => {
-    // 把牌铺到最右一格：[· … · C A · T]，右端一格不剩
-    let a = rebuildLoose(me(["c", "a", "t"]), 1);
-    let s = moveLoose(a.slots, initialOffset(3) + 0, LOOSE_SLOTS - 4);
-    s = moveLoose(s, initialOffset(3) + 1, LOOSE_SLOTS - 3);
-    s = moveLoose(s, initialOffset(3) + 2, LOOSE_SLOTS - 1); // T 和 A 之间留一个洞
-    const before = slotOf(s);
-    expect(s[LOOSE_SLOTS - 1]).not.toBeNull();
+  it("右端满了就从右往里吃空隙让位——只有右边那一截动，左边一格不动", () => {
+    // `.` 是空格。两端都有牌、空隙夹在中间——整块平移在这种局面下直接卡死
+    const before = slotsFrom("..ABCDE.LM...GHIJK");
+    const held = "abcdelmghijk".split("");
 
-    const b = reconcileLoose(me(["c", "a", "t", "s"]), s, a.nextTileId);
+    // 摸 1 张：3 个空隙够用，只有 GHIJK 退一格，LM 和 ABCDE 一动不动
+    const one = reconcileLoose(me([...held, "n"]), before, 19);
+    expect(show(one.slots)).toBe("..ABCDE.LM..GHIJKN");
+    expect(suffixShiftError(slotOf(before), slotOf(one.slots))).toBeNull();
 
-    // 新牌在最右端
-    expect(b.slots[LOOSE_SLOTS - 1]?.tile).toBe("s");
-    // 幸存的三张整体左移了同一个量（= 1），中间那个洞原样跟着走
-    const deltas = new Set<number>();
-    for (const [tileId, at] of slotOf(b.slots)) {
-      if (before.has(tileId)) deltas.add(at - before.get(tileId)!);
-    }
-    expect([...deltas]).toEqual([-1]);
-    expect(b.slots[LOOSE_SLOTS - 3]).toBeNull(); // 洞还在，没被压实
+    // 补摸 4 张：3 个空隙不够，LM 被 GHIJK 挤得跟着一起退，ABCDE 仍然不动
+    const four = reconcileLoose(me([...held, "w", "x", "y", "z"]), before, 19);
+    expect(show(four.slots)).toBe("..ABCDELMGHIJKWXYZ");
+    expect(suffixShiftError(slotOf(before), slotOf(four.slots))).toBeNull();
+    // ABCDE 左边那两格空位始终没被动用
+    expect(four.slots.slice(0, 2).every((e) => e === null)).toBe(true);
   });
 
   it("留下来的牌一格都不动", () => {
@@ -294,20 +304,12 @@ describe("fixture 回放：注入本地操作的完整序列", () => {
         r = reconcileLoose(state.me, withLocal, r.nextTileId);
 
         if (!r.rebuilt) {
-          // 不变式 3（修订）：两帧都在、且不在 consumedTileIds 里的牌，**要么原地不动，
-          // 要么整体平移同一个量**——右端放不下新牌时，整块牌会左移腾位置。
-          //
-          // 「同一个量」是这条仍然有牙齿的关键：只要有任何一张牌相对别人动了，
-          // deltas 就会多出一个值。乱序、压实、局部挪动全都会被这条抓住，
-          // 唯独放过刚性平移。平移量还必须 ≤ 0：只会往左让，不会凭空右移。
-          const deltas = new Set<number>();
-          for (const [tileId, at] of slotOf(r.slots)) {
-            if (before.has(tileId)) deltas.add(at - before.get(tileId)!);
-          }
-          expect(deltas.size, `第 ${step} 步：幸存的牌不是整体平移`).toBeLessThanOrEqual(1);
-          for (const d of deltas) {
-            expect(d, `第 ${step} 步：整体右移了 ${d}`).toBeLessThanOrEqual(0);
-          }
+          // 不变式 3（T2.1 修订）：只能往左让位，且动了的牌必须是一个后缀。
+          // 详见 test-helpers.ts 的 suffixShiftError
+          expect(
+            suffixShiftError(before, slotOf(r.slots)),
+            `第 ${step} 步`,
+          ).toBeNull()
           // 不变式 4：白搭声明跟着 tileId
           for (const [tileId, letter] of wildOf(r.slots)) {
             if (wildBefore.has(tileId)) {

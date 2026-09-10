@@ -78,6 +78,43 @@ export function slotOf(slots: LooseSlots): Map<number, number> {
   return m;
 }
 
+/**
+ * 不变式 3（T2.1 修订）：幸存的牌**只能往左让位，动了的牌必须是一个后缀**。
+ *
+ * 摸到的牌一律从右端加，右端满了就从右往里吃掉空隙给它让位，所以「槽位逐一不变」
+ * 不再成立。但放宽到此为止——这三条仍然抓得住乱序、压实、局部挪动：
+ *
+ * 1. 没有牌往右跑
+ * 2. 相对顺序不变
+ * 3. **动了的牌构成一个后缀**：某张牌没动，它右边就不许有牌动
+ *
+ * 返回 null 表示通过，否则返回人话的失败原因。
+ */
+export function suffixShiftError(
+  before: ReadonlyMap<number, number>,
+  after: ReadonlyMap<number, number>,
+): string | null {
+  const survivors = [...after]
+    .filter(([id]) => before.has(id))
+    .map(([id, to]) => ({ id, from: before.get(id)!, to }))
+    .sort((a, b) => a.from - b.from);
+
+  let movedSeen = false;
+  for (const s of survivors) {
+    if (s.to > s.from) return `tileId ${s.id} 往右跑了（${s.from} → ${s.to}）`;
+    if (s.to < s.from) movedSeen = true;
+    else if (movedSeen) {
+      return `tileId ${s.id} 在 ${s.from} 没动，但它右边有牌动了——动的必须是一个后缀`;
+    }
+  }
+  for (let i = 1; i < survivors.length; i++) {
+    if (survivors[i].to <= survivors[i - 1].to) {
+      return `tileId ${survivors[i].id} 越过了左邻——相对顺序乱了`;
+    }
+  }
+  return null;
+}
+
 /** tileId → 白搭声明，用来比对「声明有没有串位」 */
 export function wildOf(slots: LooseSlots): Map<number, string | undefined> {
   const m = new Map<number, string | undefined>();
