@@ -1816,6 +1816,21 @@ button.footer-link {
   background: rgba(255, 255, 153, 0.12);
   z-index: 5;
 }
+/* T3.4 最小的「过」按钮：等吃 / 胡的决策时出现。正式界面是 T6.1 / T6.3 */
+.table3d-pass {
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  padding: 8px 32px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: 1px solid #ffff99;
+  background: rgba(20, 60, 40, 0.9);
+  color: #ffff99;
+  cursor: pointer;
+  z-index: 6;
+}
 .table3d-canvas canvas {
   display: block;
 }

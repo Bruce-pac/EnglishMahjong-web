@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2, Vector3 } from "three";
 import { Size, ThingType } from "./types";
-import { api, ApiError, type MatchConfig } from "../api";
+import { api, ApiError, type Envelope, type MatchConfig, type Pending } from "../api";
 import { AssetLoader } from "./asset-loader";
+import { canDiscard, canPass, type DiscardIntent } from "./discard";
 import { WORLD_SIZE } from "./layout";
 import { MainView } from "./main-view";
 import { MouseUi } from "./mouse-ui";
@@ -70,6 +71,7 @@ function describeFailure(e: unknown): string {
  * 本组件只做三件事：建场景、收键鼠、每帧推进相机动画并渲染。
  * 场景/相机/灯光/后处理都在 `main-view.ts`；牌是 T1.2；拾取在 `mouse-ui.ts`（T3.1）；
  * 拖放重排的状态在 `table-view.ts`（T3.2），这里只把鼠标按下 / 松开 / 移动喂给它。
+ * 打牌（T3.4）的请求在这里发：TableView 只说「要打哪张」，本组件提交、拿回 envelope 再交还给它。
  */
 export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -78,6 +80,14 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   /** 出错了显示什么；`retry` 有值时给一个「重试」按钮（资源加载失败时没有，重试也没用） */
   const [failure, setFailure] = useState<{ message: string; retry?: () => void } | null>(null);
   const [wallLeft, setWallLeft] = useState<number | null>(null);
+  /** 等吃 / 胡的决策、且能过时显示「过」（T3.4 的最小版本，正式界面是 T6.1 / T6.3） */
+  const [passable, setPassable] = useState(false);
+  /** 轮到自己出牌时在提示条上说一声 */
+  const [myTurn, setMyTurn] = useState(false);
+  /** 服务端拒绝操作时的提示（400 的 detail），几秒后自己消失 */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** 「过」按钮要调 effect 闭包里的提交函数 */
+  const passRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -171,7 +181,17 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         endSelection();
         return;
       }
-      tableView?.dragEnd();
+      const intent = tableView?.dragEnd();
+      if (intent) submitDiscard(intent);
+    };
+    // 右键悬停中的散牌 = 打这张。和拖到牌河走同一个提交入口
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      if (!tableView || tableView.dragging || selectStart3) return;
+      const hovered = tableView.hoveredThing;
+      if (hovered === null) return;
+      const intent = tableView.discardIntentOf(hovered);
+      if (intent) submitDiscard(intent);
     };
     const onWindowMouseMove = (e: MouseEvent) => {
       if (selectDown && !selectMoved) {
@@ -245,6 +265,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     mount.addEventListener("mousemove", onMouseMove);
     mount.addEventListener("mouseleave", onMouseLeave);
     mount.addEventListener("mousedown", onMouseDown);
+    mount.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("mouseup", onMouseUp);
     window.addEventListener("mousemove", onWindowMouseMove);
     window.addEventListener("keydown", onKeyDown);
@@ -255,6 +276,65 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     let objectView: ObjectView | null = null;
     let tableView: TableView | null = null;
     let mouseUi: MouseUi | null = null;
+
+    // ---- T3.4 打牌 ----
+    let matchId: string | null = null;
+    let pending: Pending | null = null;
+    /** 请求没回来之前锁住提交，防止连打两张 */
+    let busy = false;
+    let noticeTimer = 0;
+
+    const showNotice = (message: string) => {
+      setNotice(message);
+      window.clearTimeout(noticeTimer);
+      noticeTimer = window.setTimeout(() => setNotice(null), 3500);
+    };
+
+    /** 按 pending 和锁的状态刷新：牌河是不是合法落点、要不要显示「过」 */
+    const refreshControls = () => {
+      tableView?.setDiscardAllowed(canDiscard(pending, busy));
+      setPassable(canPass(pending, busy));
+      setMyTurn(canDiscard(pending, false));
+    };
+
+    /** 吃进 envelope。AI 的动作也在里面，现在直接跳到最终状态（动画是 T5.1） */
+    const applyEnvelope = (env: Envelope, consumedTileIds: readonly number[] = []) => {
+      tableView!.apply(env, consumedTileIds);
+      matchId = env.matchId;
+      pending = env.pending;
+      setWallLeft(env.state.wallLeft);
+      refreshControls();
+    };
+
+    /**
+     * 提交一个决策。服务端 400 时显示它给的原话、局面不动（拖出去的牌早已滑回原位）。
+     * 规则一律由服务端判——比如白搭能不能打，前端照常提交。
+     */
+    const act = async (body: Parameters<typeof api.act>[1], consumedTileIds: readonly number[] = []) => {
+      if (!matchId || busy) return;
+      busy = true;
+      refreshControls();
+      try {
+        const env = await api.act(matchId, body);
+        if (!alive) return;
+        applyEnvelope(env, consumedTileIds);
+      } catch (e) {
+        if (alive) showNotice(e instanceof ApiError ? e.message : describeFailure(e));
+      } finally {
+        busy = false;
+        if (alive) refreshControls();
+      }
+    };
+
+    /** 拖到牌河、右键，都走这里。带上 tileId 给对账消歧（重复字母时空出的是打出去的那格） */
+    const submitDiscard = (intent: DiscardIntent) => {
+      if (!canDiscard(pending, busy)) return;
+      void act({ kind: "discard", tile: intent.tile }, [intent.tileId]);
+    };
+
+    passRef.current = () => {
+      if (canPass(pending, busy)) void act({ kind: "pass" });
+    };
 
     // 自建 mainLoop：每帧推进动画、对齐画布、摆相机、拾取、渲染
     let raf = 0;
@@ -316,8 +396,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           });
           if (!alive) return;
           writeMatchId(env.matchId);
-          tv.apply(env);
-          setWallLeft(env.state.wallLeft);
+          applyEnvelope(env);
         } catch (e) {
           if (alive) setFailure({ message: describeFailure(e), retry: () => void loadMatch() });
         }
@@ -330,10 +409,13 @@ export function Table3D({ onBack }: { onBack: () => void }) {
 
     return () => {
       alive = false;
+      passRef.current = null;
+      window.clearTimeout(noticeTimer);
       cancelAnimationFrame(raf);
       mount.removeEventListener("mousemove", onMouseMove);
       mount.removeEventListener("mouseleave", onMouseLeave);
       mount.removeEventListener("mousedown", onMouseDown);
+      mount.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("mousemove", onWindowMouseMove);
       window.removeEventListener("keydown", onKeyDown);
@@ -366,12 +448,22 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           )}
         </div>
       )}
+      {notice && !failure && (
+        <div className="table3d-error" role="alert">
+          <span>{notice}</span>
+        </div>
+      )}
+      {passable && (
+        <button className="table3d-pass" onClick={() => passRef.current?.()}>
+          过
+        </button>
+      )}
       <div className="table3d-hint">
         {wallLeft === null
           ? failure
             ? ""
             : "发牌中…"
-          : `牌墙剩 ${wallLeft} 张 · 空格 低头 · z / x 缩放 · p 切透视 · 拖空白处框选`}
+          : `${myTurn ? "轮到你出牌：拖到牌河或右键 · " : ""}牌墙剩 ${wallLeft} 张 · 空格 低头 · z / x 缩放 · p 切透视 · 拖空白处框选`}
       </div>
     </div>
   );

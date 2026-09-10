@@ -18,6 +18,8 @@
  * - T3.2 拖放重排（`dragStart / dragMove / dragEnd`）：纯本地、不上报服务端（D3），
  *   松手后写回 A 层的 `LooseSlots` 并存档，再走一遍正常的 layout → 分配 → 提交
  * - T3.3 框选（`setSelected`）：选中按 tileId 记，走 Custom 轨道交给 OutlinePass 描金边
+ * - T3.4 打牌：拖到自己牌河时 `dragEnd()` 返回 `DiscardIntent`，右键用 `discardIntentOf()`。
+ *   **这里不发请求**，只告诉调用方要打哪张；牌落进牌河哪一格由服务端的 envelope 决定
  * 组词 T4.x、动画 T5.x 还没接。
  */
 
@@ -31,6 +33,7 @@ import {
   type LooseSlots,
 } from "./loose-reconcile";
 import type { PickTarget } from "./mouse-ui";
+import type { DiscardIntent } from "./discard";
 import { findSlot, Movement } from "./movement";
 import type { ObjectView, Render } from "./object-view";
 import { assignThings } from "./thing-assign";
@@ -39,7 +42,8 @@ import * as persist from "./persist";
 import { makeSlots } from "./setup-slots";
 import type { Slot } from "./slot";
 import { Thing } from "./thing";
-import { ThingType } from "./types";
+import { Size, ThingType } from "./types";
+import { rectangleOverlap } from "./utils";
 
 /** 被挤开 / 落下的牌滑过去用多久（Autotable 的 SHIFT_TIME）。完整动画层是 T5.1 */
 export const SHIFT_TIME = 100;
@@ -112,6 +116,10 @@ export class TableView {
   private slides = new Map<number, Slide>();
   /** 每张牌上一帧**画在哪**。起一段新滑动时从这里出发，不会跳 */
   private drawn = new Map<number, Vector3>();
+  /** 拿着的牌现在压在自己牌河上方（T3.4） */
+  private overRiver = false;
+  /** 现在能不能打牌。由调用方按 `pending` 设（`canDiscard`），这里不判规则 */
+  private discardAllowed = false;
 
   constructor(objectView: ObjectView, slots: Map<string, Slot> = makeSlots()) {
     this.objectView = objectView;
@@ -319,6 +327,24 @@ export class TableView {
     return this.pickTargets.map((t) => this.things[t.id]!);
   }
 
+  /** 自己的牌河。拖到这片区域 = 打牌；落在哪一格由服务端决定 */
+  private riverSlots(): Slot[] {
+    return [...this.slots.values()].filter((s) => s.group === "discard" && s.seat === this.mySeat);
+  }
+
+  /** 现在能不能打牌（T3.4）。不能时拖到牌河就是非法落点，牌回原位 */
+  setDiscardAllowed(allowed: boolean): void {
+    this.discardAllowed = allowed;
+  }
+
+  /** 右键打牌：这张牌（Thing 编号）的打牌意图。不在自己散牌区返回 null */
+  discardIntentOf(thingIndex: number): DiscardIntent | null {
+    const tileId = this.tileIdOf(thingIndex);
+    if (tileId === null) return null;
+    const entry = this.loose.find((e) => e?.tileId === tileId)!;
+    return { tileId, tile: entry.tile };
+  }
+
   get dragging(): boolean {
     return this.held !== null;
   }
@@ -366,8 +392,15 @@ export class TableView {
     const x = place.position.x + this.mouse!.x - this.heldMouse!.x;
     const y = place.position.y + this.mouse!.y - this.heldMouse!.y;
 
+    // 压在自己牌河上方（照 findSlot 的「重叠超过 1」算沾上）：这一下是打牌，不找格子
+    const tile = Size[ThingType.TILE];
+    this.overRiver = this.riverSlots().some((s) => {
+      const p = s.place(0);
+      return rectangleOverlap(x, y, tile.x, tile.y, p.position.x, p.position.y, p.size.x, p.size.y) > 1;
+    });
+
     let movement: Movement | null = new Movement();
-    const target = findSlot(this.looseRow(), x, y, place.size.x, place.size.y);
+    const target = this.overRiver ? null : findSlot(this.looseRow(), x, y, place.size.x, place.size.y);
     if (target === null) {
       movement = null;
     } else {
@@ -389,10 +422,20 @@ export class TableView {
     this.objectView.updateDropShadows(movement ? [...movement.slots()].map((s) => s.place(0)) : []);
   }
 
-  /** 松手。落点合法就写回 LooseSlots；否则（含没挪动）牌回原位 */
-  dragEnd(): void {
+  /**
+   * 松手。落点合法就写回 LooseSlots；否则（含没挪动）牌回原位。
+   *
+   * 落在自己牌河上且现在能打牌：牌先滑回原位，返回打牌意图交给调用方提交。
+   * 服务端的 envelope 回来后，带着这张的 tileId 对账，它才从散牌区消失、出现在牌河里。
+   */
+  dragEnd(): DiscardIntent | null {
     const held = this.held;
-    if (!held) return;
+    if (!held) return null;
+    if (this.overRiver) {
+      const intent = this.discardAllowed ? this.discardIntentOf(held.index) : null;
+      this.cancelDrag();
+      return intent;
+    }
     const target = this.movement?.get(held) ?? null;
     const from = held.slot.indexes[0];
     const to = target?.indexes[0];
@@ -400,7 +443,7 @@ export class TableView {
 
     if (!next) {
       this.cancelDrag();
-      return;
+      return null;
     }
 
     // 落下之前记下每个 tileId 画在哪——提交之后实例可能换人（assignThings 按牌面配对，
@@ -424,6 +467,7 @@ export class TableView {
       this.drawn.set(thing.index, start);
       this.slideTo(thing, thing.place().position, now);
     });
+    return null;
   }
 
   /** 放弃这次拖动：世界状态本来就没动过，只要把画面滑回原位 */
@@ -440,6 +484,7 @@ export class TableView {
     this.heldMouse = null;
     this.mouse = null;
     this.movement = null;
+    this.overRiver = false;
     this.objectView.updateDropShadows([]);
   }
 
@@ -485,7 +530,8 @@ export class TableView {
         selected: false,
         hovered: false,
         held,
-        temporary: held && this.movement === null,
+        // 压在牌河上且能打：不算非法落点，不画半透明
+        temporary: held && this.movement === null && !(this.overRiver && this.discardAllowed),
         bottom: false,
       });
     }
