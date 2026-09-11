@@ -27,7 +27,9 @@ import { Vector3 } from "three";
 import type { Envelope } from "../api";
 import { TILE_COUNT } from "./layout";
 import {
+  groupKeyOf,
   insertLoose,
+  markGroup,
   rebuildLoose,
   reconcileLoose,
   type LooseSlots,
@@ -601,6 +603,14 @@ export class TableView {
     this.refreshFlags();
     this.objectView.updateThings(this.renders);
     return true;
+  }
+
+  /**
+   * 组暗词成功后、对账之前调用（T4.2）：把暗词的 key 写到选中的那几张牌上，
+   * 让随后的配对认准它们，而不是散牌区里最左边的同字母牌
+   */
+  markGroup(tileIds: readonly number[], tiles: string, word: string): void {
+    this.loose = markGroup(this.loose, tileIds, groupKeyOf(tiles, word));
   }
 
   clearSelection(): void {

@@ -4,6 +4,7 @@ import { Size, ThingType } from "./types";
 import { api, ApiError, type Envelope, type MatchConfig, type Pending } from "../api";
 import { AssetLoader } from "./asset-loader";
 import { SelectionValidator, type CheckState } from "./check";
+import { ConfirmGate } from "./confirm";
 import { canDiscard, canPass, type DiscardIntent } from "./discard";
 import { WORLD_SIZE } from "./layout";
 import { MainView } from "./main-view";
@@ -87,12 +88,31 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   const [passable, setPassable] = useState(false);
   /** 轮到自己出牌时在提示条上说一声 */
   const [myTurn, setMyTurn] = useState(false);
-  /** 服务端拒绝操作时的提示（400 的 detail），几秒后自己消失 */
-  const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * 顶部的一行提示，几秒后自己消失。`error` 是服务端拒绝操作（400 的 detail），
+   * `info` 是操作成功的告知（「已组成暗词 …」），后者用中性样式，别让人以为出错了
+   */
+  const [notice, setNotice] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   /** 「过」按钮要调 effect 闭包里的提交函数 */
   const passRef = useRef<(() => void) | null>(null);
   /** 校验条的状态。唯一的写入者是 SelectionValidator */
   const [check, setCheck] = useState<CheckState>({ status: "idle" });
+  // ---- T4.2 组暗词 / 亮词 ----
+  /** 有请求在途（打牌、过、组暗词、亮词共用一把锁） */
+  const [busyUi, setBusyUi] = useState(false);
+  /** 这一局结束了：组暗词不可用 */
+  const [finished, setFinished] = useState(false);
+  /** 现在是不是亮词决策（只读 pending，和 canDiscard 一样不判规则） */
+  const [revealTurn, setRevealTurn] = useState(false);
+  /** 亮词第二步（「确认亮出 …（不可撤回）」） */
+  const [revealArmed, setRevealArmed] = useState(false);
+  /** 缩写的全称输入。选区一变就清空 */
+  const [expansion, setExpansion] = useState("");
+  const actionsRef = useRef<{
+    group: (expansion: string) => void;
+    reveal: (expansion: string) => void;
+    cancel: () => void;
+  } | null>(null);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -287,10 +307,12 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     let pending: Pending | null = null;
     /** 请求没回来之前锁住提交，防止连打两张 */
     let busy = false;
+    /** 这一局结束了（结算页前的最终局面） */
+    let finishedFlag = false;
     let noticeTimer = 0;
 
-    const showNotice = (message: string) => {
-      setNotice(message);
+    const showNotice = (message: string, tone: "error" | "info" = "error") => {
+      setNotice({ text: message, tone });
       window.clearTimeout(noticeTimer);
       noticeTimer = window.setTimeout(() => setNotice(null), 3500);
     };
@@ -300,6 +322,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       tableView?.setDiscardAllowed(canDiscard(pending, busy));
       setPassable(canPass(pending, busy));
       setMyTurn(canDiscard(pending, false));
+      setBusyUi(busy);
+      setRevealTurn(pending?.kind === "reveal");
+      setFinished(finishedFlag);
     };
 
     /** 吃进 envelope。AI 的动作也在里面，现在直接跳到最终状态（动画是 T5.1） */
@@ -307,6 +332,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       tableView!.apply(env, consumedTileIds);
       matchId = env.matchId;
       pending = env.pending;
+      finishedFlag = env.matchFinished || env.result !== null;
       setWallLeft(env.state.wallLeft);
       refreshControls();
     };
@@ -315,21 +341,30 @@ export function Table3D({ onBack }: { onBack: () => void }) {
      * 提交一个决策。服务端 400 时显示它给的原话、局面不动（拖出去的牌早已滑回原位）。
      * 规则一律由服务端判——比如白搭能不能打，前端照常提交。
      */
-    const act = async (body: Parameters<typeof api.act>[1], consumedTileIds: readonly number[] = []) => {
-      if (!matchId || busy) return;
+    const submit = async (
+      call: (id: string) => Promise<Envelope>,
+      consumedTileIds: readonly number[] = [],
+      beforeApply?: () => void,
+    ): Promise<boolean> => {
+      if (!matchId || busy) return false;
       busy = true;
       refreshControls();
       try {
-        const env = await api.act(matchId, body);
-        if (!alive) return;
+        const env = await call(matchId);
+        if (!alive) return false;
+        beforeApply?.();
         applyEnvelope(env, consumedTileIds);
+        return true;
       } catch (e) {
         if (alive) showNotice(e instanceof ApiError ? e.message : describeFailure(e));
+        return false;
       } finally {
         busy = false;
         if (alive) refreshControls();
       }
     };
+    const act = (body: Parameters<typeof api.act>[1], consumedTileIds: readonly number[] = []) =>
+      submit((id) => api.act(id, body), consumedTileIds);
 
     /** 拖到牌河、右键，都走这里。带上 tileId 给对账消歧（重复字母时空出的是打出去的那格） */
     const submitDiscard = (intent: DiscardIntent) => {
@@ -346,16 +381,65 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     // 框选松手、单击空白清空、拖牌清空选中、envelope 剪掉离开的牌、打出一张被选中的牌——
     // 这些路径都只是改了选中集合或 LooseSlots，下一帧自然算出新 key，不在各自的回调里手动发请求。
     // 不看 pending、不受 busy 锁：校验是只读的提问
+    /** 校验器最新的状态。按钮提交时用它的 tiles / word（T4.1 推导结果，不从校验响应里拼） */
+    let current: CheckState = { status: "idle" };
+    /** 亮词两步确认：选区（key）一变就退回第一步 */
+    const gate = new ConfirmGate();
     const validator = new SelectionValidator(
       (tiles, word) =>
         matchId ? api.validate(matchId, tiles, word) : Promise.reject(new Error("牌局还没开始")),
       (state) => {
-        if (alive) setCheck(state);
+        if (!alive) return;
+        const key = state.status === "idle" ? "none" : state.key;
+        const prevKey = current.status === "idle" ? "none" : current.key;
+        current = state;
+        gate.sync(key);
+        if (key !== prevKey) setExpansion("");
+        setRevealArmed(gate.armed);
+        setCheck(state);
       },
       (e) => {
         if (alive) showNotice(e instanceof ApiError ? e.message : describeFailure(e));
       },
     );
+
+    // ---- T4.2 组暗词 / 亮词 / 取消 ----
+    // 规则一律交给服务端：选中的牌里有暗词的牌、亮词数量到上限这类情况，前端不预判，400 原样显示
+    actionsRef.current = {
+      group: (exp) => {
+        if (current.status !== "done" || !current.result.valid || finishedFlag) return;
+        const ids = tableView!.selectedTileIds();
+        const { tiles, word } = current;
+        void submit(
+          (id) => api.group(id, tiles, word, false, exp || undefined),
+          [],
+          // 对账之前把暗词 key 写到选中的那几张上，配对才会认准它们
+          () => tableView!.markGroup(ids, tiles, word),
+        ).then((ok) => {
+          if (!ok || !alive) return;
+          tableView?.clearSelection();
+          showNotice(`已组成暗词 ${word.toUpperCase()}`, "info");
+        });
+      },
+      reveal: (exp) => {
+        if (current.status !== "done" || !current.result.valid) return;
+        if (pending?.kind !== "reveal" || busy) return;
+        // 亮词不可撤回：第一次点只上膛，不发请求
+        if (!gate.press()) {
+          setRevealArmed(gate.armed);
+          return;
+        }
+        setRevealArmed(false);
+        const ids = tableView!.selectedTileIds();
+        const { tiles, word } = current;
+        void submit((id) => api.act(id, { kind: "reveal", tiles, word, expansion: exp || undefined }), ids);
+      },
+      cancel: () => {
+        gate.reset();
+        setRevealArmed(false);
+        tableView?.clearSelection();
+      },
+    };
 
     // 自建 mainLoop：每帧推进动画、对齐画布、摆相机、拾取、渲染
     let raf = 0;
@@ -435,6 +519,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     return () => {
       alive = false;
       passRef.current = null;
+      actionsRef.current = null;
       validator.dispose();
       window.clearTimeout(noticeTimer);
       cancelAnimationFrame(raf);
@@ -454,6 +539,10 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       view.dispose();
     };
   }, []);
+
+  /** 缩写还没填全称：组暗词、亮词都不能提交 */
+  const needExpansion =
+    check.status === "done" && !!check.result.isAbbr && expansion.trim() === "";
 
   return (
     <div className="table3d-page">
@@ -475,41 +564,85 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         </div>
       )}
       {notice && !failure && (
-        <div className="table3d-error" role="alert">
-          <span>{notice}</span>
+        <div
+          className={notice.tone === "info" ? "table3d-info" : "table3d-error"}
+          role={notice.tone === "info" ? "status" : "alert"}
+        >
+          <span>{notice.text}</span>
         </div>
       )}
-      {passable && (
-        <button className="table3d-pass" onClick={() => passRef.current?.()}>
-          过
-        </button>
-      )}
-      {check.status !== "idle" && (
-        // 教学红线：只回答「是不是词」，不列候选词、不列变位词，也不读 pending.hints
-        <div className="table3d-check" role="status">
-          <span className="table3d-check-word">{check.display}</span>
-          {check.status === "needWild" && (
-            <span className="table3d-check-meta">选中的白搭还没定字母，暂时校验不了</span>
-          )}
-          {check.status === "checking" && <span className="table3d-check-meta">校验中…</span>}
-          {check.status === "done" &&
-            (check.result.valid ? (
-              <>
-                <span className="table3d-check-ok">✓</span>
-                <span className="table3d-check-meta">
-                  {check.result.score} 分
-                  {check.result.inTier && " · 词库内 +10"}
-                  {(check.result.drawCount ?? 0) > 0 && ` · 亮出可补摸 ${check.result.drawCount} 张`}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="table3d-check-bad">✗ 不是单词</span>
-                <span className="table3d-check-meta">按散牌区从左到右的顺序读</span>
-              </>
-            ))}
-        </div>
-      )}
+      {/* T4.2 左下角统一操作区：校验条、组暗词 / 亮词 / 取消、「过」。不压自己手牌那一排 */}
+      <div className="table3d-actions">
+        {check.status !== "idle" && (
+          // 教学红线：只回答「是不是词」，不列候选词、不列变位词，也不读 pending.hints
+          <div className="table3d-check" role="status">
+            <span className="table3d-check-word">{check.display}</span>
+            {check.status === "needWild" && (
+              <span className="table3d-check-meta">选中的白搭还没定字母，暂时校验不了</span>
+            )}
+            {check.status === "checking" && <span className="table3d-check-meta">校验中…</span>}
+            {check.status === "done" &&
+              (check.result.valid ? (
+                <>
+                  <span className="table3d-check-ok">✓</span>
+                  <span className="table3d-check-meta">
+                    {check.result.score} 分
+                    {check.result.inTier && " · 词库内 +10"}
+                    {(check.result.drawCount ?? 0) > 0 && ` · 亮出可补摸 ${check.result.drawCount} 张`}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="table3d-check-bad">✗ 不是单词</span>
+                  <span className="table3d-check-meta">按散牌区从左到右的顺序读</span>
+                </>
+              ))}
+          </div>
+        )}
+        {check.status === "done" && check.result.valid && (
+          <>
+            {/* 缩写必须当场拼全称，拼得对不对由服务端判（RULES.md §8.3） */}
+            {check.result.isAbbr && (
+              <label className="table3d-expansion">
+                <span>「{check.display}」是缩写，请拼出全称：</span>
+                <input
+                  value={expansion}
+                  onChange={(e) => setExpansion(e.target.value)}
+                  placeholder="如 television"
+                  spellCheck={false}
+                />
+              </label>
+            )}
+            <div className="table3d-act-row">
+              <button
+                className="table3d-act-btn"
+                disabled={busyUi || finished || needExpansion}
+                onClick={() => actionsRef.current?.group(expansion.trim())}
+              >
+                组暗词
+              </button>
+              <button
+                className={`table3d-act-btn${revealArmed ? " confirm" : ""}`}
+                disabled={busyUi || !revealTurn || check.result.canReveal === false || needExpansion}
+                onClick={() => actionsRef.current?.reveal(expansion.trim())}
+              >
+                {revealArmed ? `确认亮出 ${check.display}（不可撤回）` : "亮词"}
+              </button>
+              <button className="table3d-act-btn" onClick={() => actionsRef.current?.cancel()}>
+                取消
+              </button>
+            </div>
+            {check.result.canReveal === false && (
+              <span className="table3d-act-note">亮出的词至少 3 个字母</span>
+            )}
+          </>
+        )}
+        {passable && (
+          <button className="table3d-pass" onClick={() => passRef.current?.()}>
+            过
+          </button>
+        )}
+      </div>
       <div className="table3d-hint">
         {wallLeft === null
           ? failure

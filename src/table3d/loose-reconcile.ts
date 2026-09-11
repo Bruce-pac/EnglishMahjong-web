@@ -31,6 +31,24 @@ export interface LooseEntry {
    * 它只在当帧内表达「这几张属于同一组」。
    */
   groupId?: number;
+  /**
+   * 这张牌属于哪个暗词：`排序后的牌面|单词`，与服务端 `me.groups` 的 `(tiles, word)` 对得上。
+   * **跨帧保留、会存档**。组暗词成功时写到选中的那几张上（`markGroup`），配对时优先认它——
+   * 否则散牌区有两张 A 时，拿右边那张组的 CAT 会被配到左边那张上。
+   * 没被任何暗词认领的牌在配对结束时清掉它（服务端打散暗词、ungroup 之后都靠这一步）。
+   */
+  groupKey?: string;
+}
+
+/** 暗词的 key：排序后的牌面 + 单词。服务端 groups 的 tiles 本来就是排序串 */
+export function groupKeyOf(tiles: string, word: string): string {
+  return [...tiles].sort().join("") + "|" + word;
+}
+
+/** 组暗词成功后，把 key 写到选中的那几张上。之后照常对账 */
+export function markGroup(slots: LooseSlots, tileIds: readonly number[], key: string): LooseSlots {
+  const ids = new Set(tileIds);
+  return slots.map((e) => (e && ids.has(e.tileId) ? { ...e, groupKey: key } : e));
 }
 
 /** 按散牌区槽位下标排列，空格是 null。长度恒为 `LOOSE_SLOTS` */
@@ -92,19 +110,34 @@ function assignGroupIds(slots: LooseSlots, groups: readonly Word[]): void {
   for (const e of slots) if (e) delete e.groupId;
 
   const taken = new Set<number>();
+  const free = (e: LooseEntry | null, letter: string): e is LooseEntry =>
+    e !== null && !taken.has(e.tileId) && e.tile === letter;
+
   groups.forEach((g, gi) => {
+    const key = groupKeyOf(g.tiles, g.word);
     const picked: LooseEntry[] = [];
     for (const letter of g.tiles) {
-      const hit = slots.find(
-        (e): e is LooseEntry => e !== null && !taken.has(e.tileId) && e.tile === letter,
-      );
+      // 挑牌的优先级：带着本组 key 的 → 没有 key 的 → 最左边的任意一张
+      const hit =
+        slots.find((e): e is LooseEntry => free(e, letter) && e.groupKey === key) ??
+        slots.find((e): e is LooseEntry => free(e, letter) && !e.groupKey) ??
+        slots.find((e): e is LooseEntry => free(e, letter));
       // 配不齐就整组放弃：宁可这一帧不显示分组，也不要标出半个暗词
-      if (!hit) return;
+      if (!hit) {
+        for (const e of picked) taken.delete(e.tileId);
+        return;
+      }
       taken.add(hit.tileId);
       picked.push(hit);
     }
-    for (const e of picked) e.groupId = gi;
+    for (const e of picked) {
+      e.groupId = gi;
+      e.groupKey = key;
+    }
   });
+
+  // 没被任何暗词认领的牌：key 清掉（暗词被打散 / 拆开了）
+  for (const e of slots) if (e && e.groupId === undefined) delete e.groupKey;
 }
 
 /**

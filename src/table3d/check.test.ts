@@ -28,21 +28,21 @@ describe("SelectionValidator", () => {
     await flush();
     h.calls[0].resolve({ valid: false });
     await flush();
-    expect(h.last()).toEqual({ status: "done", display: "ACT", result: { valid: true, score: 3 } });
+    expect(h.last()).toMatchObject({ status: "done", display: "ACT", result: { valid: true, score: 3 } });
   });
 
   it("同一个 key 不重复请求（每帧都喂也只发一次）", () => {
     const h = harness();
     for (let i = 0; i < 60; i++) h.v.update(word("cat"));
     expect(h.validate).toHaveBeenCalledTimes(1);
-    expect(h.states).toEqual([{ status: "checking", display: "CAT" }]);
+    expect(h.states).toMatchObject([{ status: "checking", display: "CAT" }]);
   });
 
   it("未声明白搭 → needWild，不发请求", () => {
     const h = harness();
     h.v.update({ kind: "needWild", display: "C★T" });
     expect(h.validate).not.toHaveBeenCalled();
-    expect(h.last()).toEqual({ status: "needWild", display: "C★T" });
+    expect(h.last()).toMatchObject({ status: "needWild", display: "C★T" });
   });
 
   it("不足 2 张 → 回到 idle，不发请求；在途的请求也作废", async () => {
@@ -53,7 +53,7 @@ describe("SelectionValidator", () => {
     h.v.update({ kind: "none" });
     h.calls[0].resolve({ valid: true, score: 3 });
     await flush();
-    expect(h.last()).toEqual({ status: "idle" });
+    expect(h.last()).toMatchObject({ status: "idle" });
   });
 
   it("选区变回原来的词会重新请求（前一次的结果已经作废）", () => {
@@ -70,7 +70,7 @@ describe("SelectionValidator", () => {
     h.calls[0].reject(new Error("断网"));
     await flush();
     expect(h.errors).toHaveLength(1);
-    expect(h.last()).toEqual({ status: "idle" });
+    expect(h.last()).toMatchObject({ status: "idle" });
   });
 
   it("过期的失败也丢弃，不弹通知", async () => {
@@ -90,6 +90,14 @@ describe("SelectionValidator", () => {
     await flush();
     h.v.update(word("act"));
     expect(h.validate).toHaveBeenCalledTimes(1);
-    expect(h.last()).toEqual({ status: "checking", display: "CAT" });
+    expect(h.last()).toMatchObject({ status: "checking", display: "CAT" });
+  });
+
+  it("状态带着推导结果的 key、tiles、word，不从校验响应里拼", async () => {
+    const h = harness();
+    h.v.update({ kind: "word", tiles: "c1d", word: "cod" });
+    h.calls[0].resolve({ valid: true, word: "something-else", score: 5 });
+    await flush();
+    expect(h.last()).toMatchObject({ status: "done", key: "word|c1d|cod", tiles: "c1d", word: "cod" });
   });
 });

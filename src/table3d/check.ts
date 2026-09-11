@@ -15,11 +15,15 @@
 import type { Validation } from "../api";
 import { spellKey, type Spell } from "./spell";
 
+/**
+ * 非空状态都带着推导结果的 `key`（亮词两步确认靠它判断「选区变了没有」）。
+ * `tiles` / `word` 是 T4.1 推导出来的，组暗词、亮词直接拿去提交——不从校验响应里重新拼。
+ */
 export type CheckState =
   | { status: "idle" }
-  | { status: "needWild"; display: string }
-  | { status: "checking"; display: string }
-  | { status: "done"; display: string; result: Validation };
+  | { status: "needWild"; key: string; display: string }
+  | { status: "checking"; key: string; display: string; tiles: string; word: string }
+  | { status: "done"; key: string; display: string; tiles: string; word: string; result: Validation };
 
 export type ValidateFn = (tiles: string, word: string) => Promise<Validation>;
 
@@ -46,16 +50,17 @@ export class SelectionValidator {
       return;
     }
     if (spell.kind === "needWild") {
-      this.onChange({ status: "needWild", display: spell.display });
+      this.onChange({ status: "needWild", key, display: spell.display });
       return;
     }
 
-    const display = spell.word.toUpperCase();
-    this.onChange({ status: "checking", display });
-    this.validate(spell.tiles, spell.word).then(
+    const { tiles, word } = spell;
+    const display = word.toUpperCase();
+    this.onChange({ status: "checking", key, display, tiles, word });
+    this.validate(tiles, word).then(
       (result) => {
         if (this.disposed || seq !== this.seq) return;
-        this.onChange({ status: "done", display, result });
+        this.onChange({ status: "done", key, display, tiles, word, result });
       },
       (error) => {
         if (this.disposed || seq !== this.seq) return;

@@ -1816,26 +1816,78 @@ button.footer-link {
   background: rgba(255, 255, 153, 0.12);
   z-index: 5;
 }
-/* T3.4 最小的「过」按钮：等吃 / 胡的决策时出现。正式界面是 T6.1 / T6.3 */
-.table3d-pass {
-  position: absolute;
-  left: 50%;
-  bottom: 44px;
-  transform: translateX(-50%);
-  padding: 8px 32px;
-  font-size: 16px;
-  border-radius: 8px;
-  border: 1px solid #ffff99;
-  background: rgba(20, 60, 40, 0.9);
-  color: #ffff99;
-  cursor: pointer;
-  z-index: 6;
-}
-/* T4.1 校验条：左下角，避开自己手牌那一排（桌面中间下方）和底部提示条 */
-.table3d-check {
+/* T4.2 左下角统一操作区：校验条 + 组暗词 / 亮词 / 取消 + 「过」。
+   放在左下角，不压自己手牌那一排（桌面中间下方） */
+.table3d-actions {
   position: absolute;
   left: 24px;
   bottom: 56px;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  z-index: 6;
+}
+.table3d-act-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.table3d-act-btn {
+  padding: 6px 16px;
+  font-size: 14px;
+  border-radius: 8px;
+  border: 1px solid #6c9a82;
+  background: rgba(20, 60, 40, 0.92);
+  color: #e8f3ec;
+  cursor: pointer;
+}
+.table3d-act-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* 亮词第二步：不可撤回，醒目一点 */
+.table3d-act-btn.confirm {
+  border-color: #ffb26b;
+  color: #ffd2a6;
+}
+/* T3.4 最小的「过」按钮。正式界面是 T6.1 / T6.3 */
+.table3d-pass {
+  padding: 6px 28px;
+  font-size: 15px;
+  border-radius: 8px;
+  border: 1px solid #ffff99;
+  background: rgba(20, 60, 40, 0.92);
+  color: #ffff99;
+  cursor: pointer;
+}
+.table3d-act-note {
+  color: #9fc3b0;
+  font-size: 12px;
+}
+.table3d-expansion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(10, 30, 20, 0.88);
+  color: #e8f3ec;
+  font-size: 13px;
+}
+.table3d-expansion input {
+  width: 180px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #6c9a82;
+  background: #0d241a;
+  color: #e8f3ec;
+}
+/* T4.1 校验条。位置由外层 .table3d-actions 决定 */
+.table3d-check {
   max-width: 360px;
   display: flex;
   flex-wrap: wrap;
@@ -1846,8 +1898,6 @@ button.footer-link {
   background: rgba(10, 30, 20, 0.88);
   color: #e8f3ec;
   font-size: 14px;
-  pointer-events: none;
-  z-index: 5;
 }
 .table3d-check-word {
   font-size: 18px;
@@ -1906,6 +1956,23 @@ button.footer-link {
   border-radius: 8px;
   background: rgba(40, 10, 10, 0.75);
   color: #ffd9cf;
+  font-size: 13px;
+}
+
+/* T4.2 操作成功的告知（「已组成暗词 …」）。位置同报错条，颜色中性，别让人以为出错了 */
+.table3d-info {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border: 1px solid rgba(200, 225, 210, 0.35);
+  border-radius: 8px;
+  background: rgba(15, 35, 25, 0.8);
+  color: #e8f3ec;
   font-size: 13px;
 }
 
