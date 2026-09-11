@@ -3,6 +3,7 @@ import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2, Vector3 } fro
 import { Size, ThingType } from "./types";
 import { api, ApiError, type Envelope, type MatchConfig, type Pending } from "../api";
 import { AssetLoader } from "./asset-loader";
+import { SelectionValidator, type CheckState } from "./check";
 import { canDiscard, canPass, type DiscardIntent } from "./discard";
 import { WORLD_SIZE } from "./layout";
 import { MainView } from "./main-view";
@@ -10,6 +11,7 @@ import { MouseUi } from "./mouse-ui";
 import { ObjectView } from "./object-view";
 import { openMatch } from "./open-match";
 import * as persist from "./persist";
+import { spellSelection } from "./spell";
 import { TableView } from "./table-view";
 import { Animation } from "./utils";
 
@@ -72,6 +74,7 @@ function describeFailure(e: unknown): string {
  * 场景/相机/灯光/后处理都在 `main-view.ts`；牌是 T1.2；拾取在 `mouse-ui.ts`（T3.1）；
  * 拖放重排的状态在 `table-view.ts`（T3.2），这里只把鼠标按下 / 松开 / 移动喂给它。
  * 打牌（T3.4）的请求在这里发：TableView 只说「要打哪张」，本组件提交、拿回 envelope 再交还给它。
+ * 单词校验（T4.1）：mainLoop 每帧把选中的牌推导成单词交给 `SelectionValidator`，变了才问服务端。
  */
 export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -88,6 +91,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   const [notice, setNotice] = useState<string | null>(null);
   /** 「过」按钮要调 effect 闭包里的提交函数 */
   const passRef = useRef<(() => void) | null>(null);
+  /** 校验条的状态。唯一的写入者是 SelectionValidator */
+  const [check, setCheck] = useState<CheckState>({ status: "idle" });
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -336,6 +341,22 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       if (canPass(pending, busy)) void act({ kind: "pass" });
     };
 
+    // ---- T4.1 单词校验 ----
+    // 结果只有一个来源：mainLoop 每帧喂最新的推导结果，校验器按 key 比对、变了才发请求。
+    // 框选松手、单击空白清空、拖牌清空选中、envelope 剪掉离开的牌、打出一张被选中的牌——
+    // 这些路径都只是改了选中集合或 LooseSlots，下一帧自然算出新 key，不在各自的回调里手动发请求。
+    // 不看 pending、不受 busy 锁：校验是只读的提问
+    const validator = new SelectionValidator(
+      (tiles, word) =>
+        matchId ? api.validate(matchId, tiles, word) : Promise.reject(new Error("牌局还没开始")),
+      (state) => {
+        if (alive) setCheck(state);
+      },
+      (e) => {
+        if (alive) showNotice(e instanceof ApiError ? e.message : describeFailure(e));
+      },
+    );
+
     // 自建 mainLoop：每帧推进动画、对齐画布、摆相机、拾取、渲染
     let raf = 0;
     const mainLoop = () => {
@@ -359,6 +380,10 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           tableView.setHovered(hasMouse ? mouseUi.pick(mouse2, view.camera) : null);
         }
         tableView.update(performance.now());
+        // 框选拖动过程中不校验（每帧都在变，逐帧发请求会刷爆服务端），松手后才算选定
+        if (!selectStart3) {
+          validator.update(spellSelection(tableView.looseSlots, tableView.selectedTileIds()));
+        }
         // 选中的牌描金边。objectView.selectedObjects 每次提交都会重填，交同一个数组即可
         if (objectView) view.updateOutline(objectView.selectedObjects);
       }
@@ -410,6 +435,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     return () => {
       alive = false;
       passRef.current = null;
+      validator.dispose();
       window.clearTimeout(noticeTimer);
       cancelAnimationFrame(raf);
       mount.removeEventListener("mousemove", onMouseMove);
@@ -457,6 +483,32 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         <button className="table3d-pass" onClick={() => passRef.current?.()}>
           过
         </button>
+      )}
+      {check.status !== "idle" && (
+        // 教学红线：只回答「是不是词」，不列候选词、不列变位词，也不读 pending.hints
+        <div className="table3d-check" role="status">
+          <span className="table3d-check-word">{check.display}</span>
+          {check.status === "needWild" && (
+            <span className="table3d-check-meta">选中的白搭还没定字母，暂时校验不了</span>
+          )}
+          {check.status === "checking" && <span className="table3d-check-meta">校验中…</span>}
+          {check.status === "done" &&
+            (check.result.valid ? (
+              <>
+                <span className="table3d-check-ok">✓</span>
+                <span className="table3d-check-meta">
+                  {check.result.score} 分
+                  {check.result.inTier && " · 词库内 +10"}
+                  {(check.result.drawCount ?? 0) > 0 && ` · 亮出可补摸 ${check.result.drawCount} 张`}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="table3d-check-bad">✗ 不是单词</span>
+                <span className="table3d-check-meta">按散牌区从左到右的顺序读</span>
+              </>
+            ))}
+        </div>
       )}
       <div className="table3d-hint">
         {wallLeft === null

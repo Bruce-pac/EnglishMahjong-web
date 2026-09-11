@@ -1831,6 +1831,41 @@ button.footer-link {
   cursor: pointer;
   z-index: 6;
 }
+/* T4.1 校验条：左下角，避开自己手牌那一排（桌面中间下方）和底部提示条 */
+.table3d-check {
+  position: absolute;
+  left: 24px;
+  bottom: 56px;
+  max-width: 360px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(10, 30, 20, 0.88);
+  color: #e8f3ec;
+  font-size: 14px;
+  pointer-events: none;
+  z-index: 5;
+}
+.table3d-check-word {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.table3d-check-ok {
+  color: #7ee29b;
+  font-weight: 600;
+}
+.table3d-check-bad {
+  color: #ff8f8f;
+  font-weight: 600;
+}
+.table3d-check-meta {
+  color: #9fc3b0;
+  font-size: 13px;
+}
 .table3d-canvas canvas {
   display: block;
 }
