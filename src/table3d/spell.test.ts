@@ -64,10 +64,13 @@ describe("spellSelection", () => {
     expect(spellSelection(s, [s[0]!.tileId, 999])).toEqual({ kind: "none" });
   });
 
-  it("暗词里的牌（groupId 非空）照常推导", () => {
-    const s = row("cat");
-    for (const e of s) if (e) e.groupId = 0;
-    expect(spellSelection(s, idsOf(s, "c", "a", "t")).kind).toBe("word");
+  it("暗词里的牌（groupId 非空）不参与推导，只读散牌", () => {
+    const s = row("catxy");
+    for (const e of s.slice(0, 3)) if (e) e.groupId = 0;
+    const all = s.flatMap((e) => (e ? [e.tileId] : []));
+    expect(spellSelection(s, all)).toEqual({ kind: "word", tiles: "xy", word: "xy" });
+    // 只选了暗词里的牌：一张散牌都没有，不校验
+    expect(spellSelection(s, idsOf(s, "c", "a", "t"))).toEqual({ kind: "none" });
   });
 
   it("word 一律小写", () => {

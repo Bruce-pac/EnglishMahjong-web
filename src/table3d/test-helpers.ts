@@ -12,7 +12,16 @@
 
 import type { State } from "../api";
 import fixtures from "./__fixtures__/envelopes.json";
-import { declareWild, insertLoose, moveLoose, type LooseSlots } from "./loose-reconcile";
+import {
+  compactGroup,
+  declareWild,
+  groupKeyOf,
+  insertLoose,
+  markGroup,
+  moveGroupLoose,
+  moveLoose,
+  type LooseSlots,
+} from "./loose-reconcile";
 
 export interface FixtureStep {
   state: State;
@@ -64,6 +73,25 @@ export function localOps(slots: LooseSlots, rand: () => number): LooseSlots {
   for (let k = 0; k < 2 && refilled.length > 0; k++) {
     const from = refilled[Math.floor(rand() * refilled.length)];
     next = insertLoose(next, from, Math.floor(rand() * next.length)) ?? next;
+  }
+
+  // T4.3 组暗词 + 收拢：随机挑连续一段（和框选一样），写上 key 再收拢
+  const lo = Math.floor(rand() * next.length);
+  const win = next.slice(lo, lo + 1 + Math.floor(rand() * 4)).flatMap((e) => (e ? [e] : []));
+  if (win.length >= 2) {
+    const ids = win.map((e) => e.tileId);
+    const tiles = win.map((e) => e.tile).join("");
+    next = compactGroup(markGroup(next, ids, groupKeyOf(tiles, tiles)), ids) ?? next;
+  }
+
+  // T4.3 整组拖动：有暗词就拖一个暗词，没有就拖刚才那一段。非法落点返回 null，等于整组回原位
+  const inGroups = next.flatMap((e) => (e && e.groupId !== undefined ? [e] : []));
+  const gid = inGroups.length ? inGroups[Math.floor(rand() * inGroups.length)].groupId : undefined;
+  const members =
+    gid !== undefined ? inGroups.filter((e) => e.groupId === gid).map((e) => e.tileId) : win.map((e) => e.tileId);
+  if (members.length > 0) {
+    const anchor = next.findIndex((e) => e !== null && members.includes(e.tileId));
+    next = moveGroupLoose(next, members, anchor, Math.floor(rand() * next.length)) ?? next;
   }
 
   // 白搭赋值：随机挑一个还没声明的白搭，给它一个本类字母

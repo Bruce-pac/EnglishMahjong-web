@@ -1886,6 +1886,21 @@ button.footer-link {
   background: #0d241a;
   color: #e8f3ec;
 }
+/* T4.3 单击暗词后组旁的 [拆开]。left/top 由 Table3D 每帧按投影位置写（锚点在组最右那张上方） */
+.table3d-ungroup {
+  position: fixed;
+  visibility: hidden;
+  transform: translate(-50%, -100%);
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid #4fd1ff;
+  background: rgba(10, 30, 40, 0.92);
+  color: #bdeeff;
+  cursor: pointer;
+  z-index: 7;
+}
+
 /* T4.1 校验条。位置由外层 .table3d-actions 决定 */
 .table3d-check {
   max-width: 360px;

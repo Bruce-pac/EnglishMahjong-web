@@ -339,6 +339,123 @@ export function insertLoose(slots: LooseSlots, from: number, to: number): LooseS
   return null;
 }
 
+/**
+ * 组暗词成功后的收拢（T4.3）：把成员向左收拢到第一张成员的格子起，按原来的左右顺序连成一块。
+ *
+ * 框选只能框连续的一段，所以成员之间只可能夹着空格——收拢只会把成员挪进这些空格，
+ * **碰不到别的牌**，读出来的词也不变。万一成员之间夹着非成员（调用方传错了），
+ * 返回 null，调用方不收拢。
+ */
+export function compactGroup(slots: LooseSlots, tileIds: readonly number[]): LooseSlots | null {
+  const ids = new Set(tileIds);
+  const at = slots.flatMap((e, i) => (e && ids.has(e.tileId) ? [i] : []));
+  if (at.length === 0) return slots.slice();
+  const first = at[0];
+  const last = at[at.length - 1];
+  for (let i = first; i <= last; i++) {
+    const e = slots[i];
+    if (e && !ids.has(e.tileId)) return null;
+  }
+  const next = slots.slice();
+  const members = at.map((i) => slots[i]);
+  for (const i of at) next[i] = null;
+  members.forEach((e, k) => (next[first + k] = e));
+  return next;
+}
+
+/**
+ * 整组拖动落下（T4.3）：`tileIds` 这组牌整体平移 `to - from` 格（`from` / `to` 是按下的那张的
+ * 原格和落点格），成员之间的相对格距不变；挡路的牌沿这一排让位。
+ *
+ * 让位规则与 `movement.ts` 的 `findShift / tryShift` **逐格一致**（有随机测试钉着）：
+ * 成员从左到右处理；成员要落的格子上有别的牌，就让那张牌先试往左、不行再试往右挪，
+ * 挪的时候跳过所有成员要落的格子，碰到空格为止；隔壁有牌就递归先让它挪。
+ *
+ * 任何一张成员越界、或者挡路的牌让不开，返回 null——非法落点，整组回原位。
+ */
+export function moveGroupLoose(
+  slots: LooseSlots,
+  tileIds: readonly number[],
+  from: number,
+  to: number,
+): LooseSlots | null {
+  const n = slots.length;
+  const ids = new Set(tileIds);
+  const at = slots.flatMap((e, i) => (e && ids.has(e.tileId) ? [i] : []));
+  if (at.length === 0) return null;
+  const delta = to - from;
+  const targets = at.map((i) => i + delta);
+  if (targets.some((t) => t < 0 || t >= n)) return null;
+  const targetSet = new Set(targets);
+
+  // 不动的牌：格子 → entry（成员不在里面，所以成员的原格算空格）
+  let shift = new Map<number, LooseEntry>();
+  slots.forEach((e, i) => {
+    if (e && !ids.has(e.tileId)) shift.set(i, e);
+  });
+
+  const tryShift = (initial: number, dir: number, map: Map<number, LooseEntry>): boolean => {
+    let slot = initial;
+    const entry = map.get(initial)!;
+    while (slot === initial || targetSet.has(slot)) {
+      const next = slot + dir;
+      if (next < 0 || next >= n) return false;
+      if (map.has(next) && !tryShift(next, dir, map)) return false;
+      map.delete(slot);
+      map.set(next, entry);
+      slot = next;
+    }
+    return true;
+  };
+
+  for (const t of targets) {
+    if (!shift.has(t)) continue;
+    let done: Map<number, LooseEntry> | null = null;
+    for (const dir of [-1, 1]) {
+      const cloned = new Map(shift);
+      if (tryShift(t, dir, cloned)) {
+        done = cloned;
+        break;
+      }
+    }
+    if (!done) return null;
+    shift = done;
+  }
+
+  const next: LooseSlots = new Array(n).fill(null);
+  for (const [i, e] of shift) next[i] = e;
+  at.forEach((i, k) => (next[targets[k]] = slots[i]));
+  return next;
+}
+
+/**
+ * 这次落下会不会把别的牌塞进某个暗词中间（T4.3）。暗词除非拆开，不能被别的牌分开——
+ * 否则 CAT 中间塞进 B 变成 CABT，看着拆了、其实还是一组，拖 C 时 CA 和 T 又一起动。
+ *
+ * 对 `after` 里的每个暗词，看它从最左到最右成员之间的范围里有没有**非成员的牌**；
+ * 出现了 `before` 里那个范围没有的，就算分开了。只和 `before` 比、不要求范围里完全干净，
+ * 是为了照顾 2.5D 组的、本来就散开（甚至夹着别的牌）的暗词：已有的状态不追究，只禁止新的插入。
+ * 成员之间只有空格不算分开。
+ */
+export function splitsGroup(before: LooseSlots, after: LooseSlots): boolean {
+  const intruders = (slots: LooseSlots, gid: number): Set<number> => {
+    const at = slots.flatMap((e, i) => (e?.groupId === gid ? [i] : []));
+    const out = new Set<number>();
+    if (at.length === 0) return out;
+    for (let i = at[0]; i <= at[at.length - 1]; i++) {
+      const e = slots[i];
+      if (e && e.groupId !== gid) out.add(e.tileId);
+    }
+    return out;
+  };
+  const groups = new Set(after.flatMap((e) => (e && e.groupId !== undefined ? [e.groupId] : [])));
+  for (const gid of groups) {
+    const was = intruders(before, gid);
+    for (const id of intruders(after, gid)) if (!was.has(id)) return true;
+  }
+  return false;
+}
+
 /** 给白搭声明代表的字母（§4.4，随时可改）。声明跟着 tileId 走，不跟着槽位走 */
 export function declareWild(slots: LooseSlots, tileId: number, letter: string): LooseSlots {
   return slots.map((e) => (e && e.tileId === tileId ? { ...e, wildLetter: letter } : e));

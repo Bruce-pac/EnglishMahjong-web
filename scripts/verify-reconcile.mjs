@@ -65,6 +65,23 @@ function localOps(slots, rand) {
     const from = filled[Math.floor(rand() * filled.length)];
     next = m.insertLoose(next, from, Math.floor(rand() * next.length)) ?? next;
   }
+  // T4.3 组暗词 + 收拢：随机挑连续一段（和框选一样），写上 key 再收拢
+  const lo = Math.floor(rand() * next.length);
+  const win = next.slice(lo, lo + 1 + Math.floor(rand() * 4)).filter(Boolean);
+  if (win.length >= 2) {
+    const ids = win.map((e) => e.tileId);
+    const tiles = win.map((e) => e.tile).join("");
+    next = m.compactGroup(m.markGroup(next, ids, m.groupKeyOf(tiles, tiles)), ids) ?? next;
+  }
+  // T4.3 整组拖动：有暗词就拖一个暗词，没有就拖刚才那一段。非法落点返回 null，等于整组回原位
+  const inGroups = next.filter((e) => e && e.groupId !== undefined);
+  const gid = inGroups.length ? inGroups[Math.floor(rand() * inGroups.length)].groupId : undefined;
+  const members =
+    gid !== undefined ? inGroups.filter((e) => e.groupId === gid).map((e) => e.tileId) : win.map((e) => e.tileId);
+  if (members.length > 0) {
+    const anchor = next.findIndex((e) => e && members.includes(e.tileId));
+    next = m.moveGroupLoose(next, members, anchor, Math.floor(rand() * next.length)) ?? next;
+  }
   for (const e of next.filter((x) => x && (x.tile === "1" || x.tile === "2"))) {
     if (rand() < 0.5) continue;
     const pool = e.tile === "1" ? VOWELS : CONSONANTS;

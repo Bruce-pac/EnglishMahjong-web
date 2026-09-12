@@ -25,6 +25,9 @@ import { WORLD_SIZE } from "./layout";
  */
 const RATIO = 1.5;
 
+/** 暗词框的颜色（T4.3）。选中是浅黄 0xffff99，暗词用青蓝，两者一眼分得开。待用户看截图定 */
+const GROUP_EDGE_COLOR = 0x4fd1ff;
+
 /**
  * 场景、相机、灯光、后处理。**不管牌，也不管交互**——那是 T1.2 / T3.x 的事。
  *
@@ -53,6 +56,8 @@ export class MainView {
   camera: Camera = null!;
   private composer: EffectComposer = null!;
   private outlinePass: OutlinePass = null!;
+  /** 暗词框（T4.3）。和选中的金边分开两个 pass，颜色才能一眼分得开 */
+  private groupOutlinePass: OutlinePass = null!;
 
   private perspective = false;
   private width = 0;
@@ -127,6 +132,12 @@ export class MainView {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
+    // 暗词框先画，选中的金边后画：两者叠在同一张牌上时金边在上面
+    this.groupOutlinePass = new OutlinePass(new Vector2(w, h), this.scene, this.camera);
+    this.groupOutlinePass.visibleEdgeColor.setHex(GROUP_EDGE_COLOR);
+    this.groupOutlinePass.hiddenEdgeColor.setHex(0x333333);
+    this.composer.addPass(this.groupOutlinePass);
+
     this.outlinePass = new OutlinePass(new Vector2(w, h), this.scene, this.camera);
     // 金色描边：T4.3 的暗词组要靠它围金边（0xffff99）
     this.outlinePass.visibleEdgeColor.setHex(0xffff99);
@@ -141,8 +152,10 @@ export class MainView {
 
     // 逼 OutlinePass 现在就把 shader 编译掉，否则第一次选中牌会卡一下
     this.outlinePass.selectedObjects.push(this.dummyObject);
+    this.groupOutlinePass.selectedObjects.push(this.dummyObject);
     this.composer.render();
     this.outlinePass.selectedObjects.pop();
+    this.groupOutlinePass.selectedObjects.pop();
 
     // 尺寸是在 updateViewport 里定的，这里重建之后要重新同步一次
     this.width = 0;
@@ -247,6 +260,11 @@ export class MainView {
   /** 要描金边的 mesh。T3.3 框选、T4.3 暗词组都往这里塞 */
   updateOutline(selectedObjects: Array<Object3D>): void {
     this.outlinePass.selectedObjects = selectedObjects;
+  }
+
+  /** 暗词的牌（T4.3），描暗词框 */
+  updateGroupOutline(groupedObjects: Array<Object3D>): void {
+    this.groupOutlinePass.selectedObjects = groupedObjects;
   }
 
   setPerspective(perspective: boolean): void {

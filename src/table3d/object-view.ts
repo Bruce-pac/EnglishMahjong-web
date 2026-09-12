@@ -25,6 +25,8 @@ export interface Render {
   temporary: boolean;
   /** 被压在别的牌下面，画暗一点 */
   bottom: boolean;
+  /** 属于某个暗词（T4.3）：交给第二个 OutlinePass 描暗词框。可省略，默认不是 */
+  grouped?: boolean;
 }
 
 /**
@@ -59,6 +61,8 @@ export class ObjectView {
 
   /** 这一帧被选中的牌，交给 OutlinePass 描金边（T3.3） */
   readonly selectedObjects: Array<Mesh> = [];
+  /** 这一帧属于暗词的牌，交给第二个 OutlinePass 描暗词框（T4.3） */
+  readonly groupedObjects: Array<Mesh> = [];
 
   constructor(mainGroup: Group, assetLoader: AssetLoader) {
     this.mainGroup = mainGroup;
@@ -131,8 +135,10 @@ export class ObjectView {
   /** 每帧决定每张牌走 Simple 还是 Custom */
   updateThings(things: Array<Render>): void {
     this.selectedObjects.splice(0);
+    this.groupedObjects.splice(0);
     for (const thing of things) {
-      const custom = thing.hovered || thing.selected || thing.held || thing.bottom;
+      // OutlinePass 描不了 InstancedMesh 里的某一个实例，所以暗词的牌也得走 Custom 轨
+      const custom = thing.hovered || thing.selected || thing.held || thing.bottom || !!thing.grouped;
       if (!custom) {
         this.tileGroup.setSimple(thing.thingIndex, thing.place.position, thing.place.rotation);
         continue;
@@ -157,6 +163,7 @@ export class ObjectView {
       if (thing.hovered) material.emissive.setRGB(HOVER_GLOW, HOVER_GLOW, HOVER_GLOW);
       if (thing.bottom) material.color.setRGB(0.8, 0.8, 0.8);
       if (thing.selected) this.selectedObjects.push(obj);
+      if (thing.grouped) this.groupedObjects.push(obj);
       if (thing.held) {
         // 抓在手里的牌永远浮在最上面，不被别的牌挡住
         material.transparent = true;

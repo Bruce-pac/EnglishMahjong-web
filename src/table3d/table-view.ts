@@ -27,11 +27,15 @@ import { Vector3 } from "three";
 import type { Envelope } from "../api";
 import { TILE_COUNT } from "./layout";
 import {
+  compactGroup,
   groupKeyOf,
   insertLoose,
   markGroup,
+  moveGroupLoose,
+  splitsGroup,
   rebuildLoose,
   reconcileLoose,
+  type LooseEntry,
   type LooseSlots,
 } from "./loose-reconcile";
 import type { PickTarget } from "./mouse-ui";
@@ -102,13 +106,23 @@ export class TableView {
    * 对调实例，tileId 才是牌的身份。牌离开散牌区就从这里去掉（见 commit）
    */
   private selectedTiles = new Set<number>();
+  /**
+   * 单击选中的暗词（T4.3），按 `groupKey` 记——`groupId` 每帧重算，key 才跨帧稳定。
+   * 暗词被拆开后对账会清掉 key，这里自然就找不到了（[拆开] 按钮随之消失）
+   */
+  private focusedKey: string | null = null;
 
   /** 最近一次的 envelope。拖放落下后要拿它的 state 重新 layout、判断要不要存档 */
   private lastEnv: Envelope | null = null;
 
   // ---- T3.2 拖放 ----
-  /** 手里拿着的牌。null = 没在拖 */
+  /** 手里拿着的牌（按下的那张，整组拖动时它是锚点）。null = 没在拖 */
   private held: Thing | null = null;
+  /**
+   * 一起拿起来的牌（T4.3）：按下的是暗词里的牌就是整个暗词，否则只有 held 自己。
+   * 按槽位从左到右排
+   */
+  private heldGroup: Thing[] = [];
   /** 按下时鼠标在拖动平面上的位置；之后的位移都相对它算 */
   private heldMouse: Vector3 | null = null;
   private mouse: Vector3 | null = null;
@@ -339,8 +353,20 @@ export class TableView {
     this.discardAllowed = allowed;
   }
 
-  /** 右键打牌：这张牌（Thing 编号）的打牌意图。不在自己散牌区返回 null */
+  /**
+   * 这张牌（Thing 编号）是不是暗词里的牌。
+   *
+   * 暗词里的牌**不单独参与任何操作**（打牌、框选、组暗词、亮词），要用得先拆开。
+   * 原因在服务端只认字母：暗词 LOST 右边还有一张散的 T 时，提交「打 T」，服务端打掉的是
+   * 散的那张，前端却把暗词里那张当成打出的牌移除，下一次对账 LOST 就配到了散的 T 上
+   */
+  inGroup(thingIndex: number): boolean {
+    return this.entryOf(thingIndex)?.groupId !== undefined;
+  }
+
+  /** 右键打牌：这张牌（Thing 编号）的打牌意图。不在自己散牌区、或是暗词里的牌，返回 null */
   discardIntentOf(thingIndex: number): DiscardIntent | null {
+    if (this.inGroup(thingIndex)) return null;
     const tileId = this.tileIdOf(thingIndex);
     if (tileId === null) return null;
     const entry = this.loose.find((e) => e?.tileId === tileId)!;
@@ -368,6 +394,14 @@ export class TableView {
     // 拖一张牌时先清空选中（整组拖动是 T4.3）
     this.clearSelection();
     this.held = this.things[this.hovered]!;
+    // 按下的是暗词里的牌 → 整组一起拿起，成员之间的相对格距不变
+    const gid = this.entryOf(this.held.index)?.groupId;
+    this.heldGroup =
+      gid === undefined
+        ? [this.held]
+        : this.looseThings()
+            .filter((t) => this.entryOf(t.index)?.groupId === gid)
+            .sort((a, b) => a.slot.indexes[0] - b.slot.indexes[0]);
     this.setHovered(null);
     this.heldMouse = mouse3.clone();
     this.mouse = mouse3.clone();
@@ -401,20 +435,36 @@ export class TableView {
       return rectangleOverlap(x, y, tile.x, tile.y, p.position.x, p.position.y, p.size.x, p.size.y) > 1;
     });
 
+    // 整组拖动：锚点（按下的那张）找落点，其余成员按原来的相对格距跟着走，
+    // 一次 move 多张（Autotable world.ts:320-350）。任何一张越界 → 非法落点
     let movement: Movement | null = new Movement();
     const target = this.overRiver ? null : findSlot(this.looseRow(), x, y, place.size.x, place.size.y);
     if (target === null) {
       movement = null;
     } else {
-      movement.move(held, target);
-      if (!movement.findShift(this.looseThings()) || !movement.valid()) movement = null;
+      const row = this.looseRow().sort((a, b) => a.indexes[0] - b.indexes[0]);
+      const delta = target.indexes[0] - held.slot.indexes[0];
+      for (const member of this.heldGroup) {
+        const slot = row[member.slot.indexes[0] + delta];
+        if (!slot) {
+          movement = null;
+          break;
+        }
+        movement.move(member, slot);
+      }
+      if (movement && (!movement.findShift(this.looseThings()) || !movement.valid())) movement = null;
+      // 暗词除非拆开，不能被别的牌分开：按落下后的结果判，会把别的牌塞进某个暗词中间就是非法落点
+      if (movement && target !== held.slot) {
+        const result = this.dropResult(target);
+        if (!result || splitsGroup(this.loose, result)) movement = null;
+      }
     }
     this.movement = movement;
 
     // 被挤开的牌滑到预览位置；不再被挤的滑回去
     const now = performance.now();
     for (const thing of this.looseThings()) {
-      if (thing === held) continue;
+      if (this.heldGroup.includes(thing)) continue;
       const to = (movement?.shifts().get(thing) ?? thing.slot).place(thing.rotationIndex).position;
       const cur = this.slides.get(thing.index);
       if (cur ? !cur.to.equals(to) : !this.drawnAt(thing).equals(to)) this.slideTo(thing, to, now);
@@ -434,14 +484,15 @@ export class TableView {
     const held = this.held;
     if (!held) return null;
     if (this.overRiver) {
-      const intent = this.discardAllowed ? this.discardIntentOf(held.index) : null;
+      // 整组拖到牌河不算打牌（一次只能打一张），整组滑回
+      const single = this.heldGroup.length === 1;
+      const intent = single && this.discardAllowed ? this.discardIntentOf(held.index) : null;
       this.cancelDrag();
       return intent;
     }
     const target = this.movement?.get(held) ?? null;
-    const from = held.slot.indexes[0];
-    const to = target?.indexes[0];
-    const next = target && target !== held.slot ? insertLoose(this.loose, from, to!) : null;
+    let next = target && target !== held.slot ? this.dropResult(target) : null;
+    if (next && splitsGroup(this.loose, next)) next = null;
 
     if (!next) {
       this.cancelDrag();
@@ -481,8 +532,27 @@ export class TableView {
     for (const thing of things) this.slideTo(thing, thing.place().position, now);
   }
 
+  /**
+   * 拿着的牌（或整组）落到 `target` 之后的 LooseSlots。与 Movement 的预览逐格一致（有随机测试），
+   * 预览时拿它判「会不会分开暗词」，松手时拿它写回
+   */
+  private dropResult(target: Slot): LooseSlots | null {
+    const held = this.held!;
+    const from = held.slot.indexes[0];
+    const to = target.indexes[0];
+    return this.heldGroup.length > 1
+      ? moveGroupLoose(
+          this.loose,
+          this.heldGroup.map((t) => this.entryOf(t.index)!.tileId),
+          from,
+          to,
+        )
+      : insertLoose(this.loose, from, to);
+  }
+
   private endDrag(): void {
     this.held = null;
+    this.heldGroup = [];
     this.heldMouse = null;
     this.mouse = null;
     this.movement = null;
@@ -509,7 +579,7 @@ export class TableView {
     for (const thing of this.looseThings()) {
       const place = thing.place();
       let position = place.position;
-      const held = thing === this.held;
+      const held = this.heldGroup.includes(thing);
 
       if (held) {
         position = place.position.clone();
@@ -533,8 +603,13 @@ export class TableView {
         hovered: false,
         held,
         // 压在牌河上且能打：不算非法落点，不画半透明
-        temporary: held && this.movement === null && !(this.overRiver && this.discardAllowed),
+        temporary:
+          held &&
+          this.movement === null &&
+          !(this.overRiver && this.discardAllowed && this.heldGroup.length === 1),
         bottom: false,
+        // 滑动过程中暗词框也得在，不然一拖就闪一下
+        grouped: this.entryOf(thing.index)?.groupId !== undefined,
       });
     }
     if (!this.held && this.slides.size === 0) this.drawn.clear();
@@ -573,7 +648,15 @@ export class TableView {
       r.hovered = r.thingIndex === this.hovered;
       const tileId = this.tileIdOf(r.thingIndex);
       r.selected = tileId !== null && this.selectedTiles.has(tileId);
+      r.grouped = this.entryOf(r.thingIndex)?.groupId !== undefined;
     }
+  }
+
+  /** 这张牌（Thing 编号）在 LooseSlots 里的 entry。不在自己散牌区返回 null */
+  private entryOf(thingIndex: number): LooseEntry | null {
+    const slot = this.things[thingIndex]?.slot;
+    if (!slot || slot.group !== "loose" || slot.seat !== this.mySeat) return null;
+    return this.loose[slot.indexes[0]] ?? null;
   }
 
   /** 这张牌（Thing 编号）的 tileId。不在自己散牌区返回 null */
@@ -593,6 +676,8 @@ export class TableView {
     const next = new Set<number>();
     for (const i of thingIds) {
       if (!this.pickTargets.some((t) => t.id === i)) continue;
+      // 暗词里的牌不单独参与操作：框选框进来也不算选中（见 inGroup）
+      if (this.inGroup(i)) continue;
       const tileId = this.tileIdOf(i);
       if (tileId !== null) next.add(tileId);
     }
@@ -613,8 +698,58 @@ export class TableView {
     this.loose = markGroup(this.loose, tileIds, groupKeyOf(tiles, word));
   }
 
+  /**
+   * 组暗词成功后收拢（T4.3）：成员向左连成一块。和 `markGroup` 一样在对账之前调用，
+   * 于是只有一次提交。成员之间夹着别的牌时 `compactGroup` 返回 null，就不收拢
+   */
+  compactGroup(tileIds: readonly number[]): void {
+    this.loose = compactGroup(this.loose, tileIds) ?? this.loose;
+  }
+
   clearSelection(): void {
+    this.focusedKey = null;
     this.setSelected([]);
+  }
+
+  /**
+   * 单击暗词里的一张（T4.3）：聚焦这个暗词，调用方据此在组旁显示 [拆开]。
+   *
+   * **不选中成员**：选中会触发单词校验，左下角就会冒出校验条和 [组暗词] [亮词] [取消]——
+   * 单击暗词只该出 [拆开]。已有的选中顺手清掉，免得残留的校验条和 [拆开] 同时出现。
+   * 暗词本身的框一直在，不需要再描金边。点的不是暗词里的牌返回 false，什么都不改
+   */
+  focusGroupAt(thingIndex: number): boolean {
+    const key = this.entryOf(thingIndex)?.groupKey;
+    if (!key || this.entryOf(thingIndex)?.groupId === undefined) return false;
+    this.setSelected([]);
+    this.focusedKey = key;
+    return true;
+  }
+
+  clearFocusedGroup(): void {
+    this.focusedKey = null;
+  }
+
+  /**
+   * 聚焦中的暗词：拆开要提交的牌面（按槽位从左到右，服务端会自己排序），
+   * 以及 [拆开] 按钮的锚点——最右边那张牌顶面的上方，`mainGroup` 局部坐标，
+   * 调用方每帧用 `mouseUi.project` 投到屏幕，镜头动了按钮跟着走。没有聚焦的暗词返回 null
+   */
+  focusedGroupInfo(): { tiles: string; anchor: Vector3 } | null {
+    if (this.focusedKey === null) return null;
+    const members = this.looseThings()
+      .filter((t) => {
+        const e = this.entryOf(t.index);
+        return e?.groupKey === this.focusedKey && e.groupId !== undefined;
+      })
+      .sort((a, b) => a.slot.indexes[0] - b.slot.indexes[0]);
+    if (members.length === 0) return null;
+    const tiles = members.map((t) => this.entryOf(t.index)!.tile).join("");
+    const place = members[members.length - 1].place();
+    const anchor = place.position.clone();
+    anchor.z += place.size.z / 2;
+    anchor.y += place.size.y / 2;
+    return { tiles, anchor };
   }
 
   /** 选中的 tileId，**按槽位从左到右**。T4.1 按这个顺序拼单词 */

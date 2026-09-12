@@ -81,6 +81,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null);
   /** 框选的选框。DOM 覆盖层而不是 3D 对象（研究笔记 §4.3：恒定面向屏幕的 UI 一律用 DOM） */
   const selectionRef = useRef<HTMLDivElement>(null);
+  /** 单击暗词后出现在组旁的 [拆开]（T4.3）。每帧按投影位置定位，所以直接改 DOM 而不走 React state */
+  const ungroupBtnRef = useRef<HTMLButtonElement>(null);
+  const ungroupActRef = useRef<(() => void) | null>(null);
   /** 出错了显示什么；`retry` 有值时给一个「重试」按钮（资源加载失败时没有，重试也没用） */
   const [failure, setFailure] = useState<{ message: string; retry?: () => void } | null>(null);
   const [wallLeft, setWallLeft] = useState<number | null>(null);
@@ -117,7 +120,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     const mount = mountRef.current;
     const selectionEl = selectionRef.current;
-    if (!mount || !selectionEl) return;
+    const ungroupEl = ungroupBtnRef.current;
+    if (!mount || !selectionEl || !ungroupEl) return;
 
     // 世界坐标那一层。桌面和牌都挂这里，永不旋转（换座位转的是相机组）
     const mainGroup = new Group();
@@ -171,6 +175,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     let selectDown: { x: number; y: number } | null = null;
     let selectMoved = false;
 
+    // ---- T4.3 单击暗词 ----
+    /** 在牌上按下的位置和那张牌。松手时没挪动超过 3px 就算单击（和框选同一个阈值） */
+    let tileDown: { x: number; y: number; thing: number } | null = null;
+    let tileMoved = false;
+
     const endSelection = () => {
       selectStart3 = null;
       selectDown = null;
@@ -185,14 +194,21 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       if (tableView.hoveredThing !== null) {
         const z = tableView.dragZ;
         if (z === null) return;
+        const thing = tableView.hoveredThing;
         const p = mouseUi.raycastLevel(mouse2, view.camera, z);
-        if (p && tableView.dragStart(p)) e.preventDefault(); // 别拖出文字选区
+        if (p && tableView.dragStart(p)) {
+          // 只拦 mousedown 的默认行为（文字选区），不碰 click / dblclick——T4.4 要用双击给白搭赋值
+          e.preventDefault();
+          tileDown = { x: e.clientX, y: e.clientY, thing };
+          tileMoved = false;
+        }
         return;
       }
       const p = mouseUi.raycastLevel(mouse2, view.camera, 0);
       if (!p) return;
       selectStart3 = p;
       selectDown = { x: e.clientX, y: e.clientY };
+      tableView.clearFocusedGroup(); // 开始框选，[拆开] 就收起来
       selectMoved = false;
       tableView.setHovered(null); // 框选过程中不显示悬停
       e.preventDefault();
@@ -208,6 +224,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       }
       const intent = tableView?.dragEnd();
       if (intent) submitDiscard(intent);
+      // 在暗词的牌上按下又松开、没挪动 → 选中这个暗词，组旁出 [拆开]
+      if (tileDown && !tileMoved) tableView?.focusGroupAt(tileDown.thing);
+      tileDown = null;
     };
     // 右键悬停中的散牌 = 打这张。和拖到牌河走同一个提交入口
     const onContextMenu = (e: MouseEvent) => {
@@ -215,12 +234,20 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       if (!tableView || tableView.dragging || selectStart3) return;
       const hovered = tableView.hoveredThing;
       if (hovered === null) return;
+      // 暗词里的牌不单独打：服务端只认字母，散牌里有同字母的牌时它会打掉那张，所以前端先拦，不发请求
+      if (tableView.inGroup(hovered)) {
+        showNotice("暗词里的牌不能单独打，先拆开");
+        return;
+      }
       const intent = tableView.discardIntentOf(hovered);
       if (intent) submitDiscard(intent);
     };
     const onWindowMouseMove = (e: MouseEvent) => {
       if (selectDown && !selectMoved) {
         selectMoved = Math.hypot(e.clientX - selectDown.x, e.clientY - selectDown.y) > 3;
+      }
+      if (tileDown && !tileMoved) {
+        tileMoved = Math.hypot(e.clientX - tileDown.x, e.clientY - tileDown.y) > 3;
       }
     };
 
@@ -414,7 +441,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           (id) => api.group(id, tiles, word, false, exp || undefined),
           [],
           // 对账之前把暗词 key 写到选中的那几张上，配对才会认准它们
-          () => tableView!.markGroup(ids, tiles, word),
+          // 然后收拢：成员向左连成一块（框选只能框连续一段，只会挪进成员之间的空格）
+          () => {
+            tableView!.markGroup(ids, tiles, word);
+            tableView!.compactGroup(ids);
+          },
         ).then((ok) => {
           if (!ok || !alive) return;
           tableView?.clearSelection();
@@ -439,6 +470,15 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         setRevealArmed(false);
         tableView?.clearSelection();
       },
+    };
+
+    // [拆开]：成功后牌原地不动，只是框没了（groupKey 由对账清掉）
+    ungroupActRef.current = () => {
+      const info = tableView?.focusedGroupInfo();
+      if (!info) return;
+      void submit((id) => api.ungroup(id, info.tiles)).then((ok) => {
+        if (ok && alive) tableView?.clearSelection();
+      });
     };
 
     // 自建 mainLoop：每帧推进动画、对齐画布、摆相机、拾取、渲染
@@ -469,7 +509,21 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           validator.update(spellSelection(tableView.looseSlots, tableView.selectedTileIds()));
         }
         // 选中的牌描金边。objectView.selectedObjects 每次提交都会重填，交同一个数组即可
-        if (objectView) view.updateOutline(objectView.selectedObjects);
+        if (objectView) {
+          view.updateOutline(objectView.selectedObjects);
+          view.updateGroupOutline(objectView.groupedObjects);
+        }
+        // [拆开] 跟着暗词走：锚点每帧重新投影，镜头缩放、低头时也贴着组
+        const focused = tableView.dragging ? null : tableView.focusedGroupInfo();
+        if (focused) {
+          const p = mouseUi.project(focused.anchor, view.camera);
+          const rect = view.canvas.getBoundingClientRect();
+          ungroupEl.style.left = `${rect.left + ((p.x + 1) / 2) * rect.width}px`;
+          ungroupEl.style.top = `${rect.top + ((1 - p.y) / 2) * rect.height}px`;
+          ungroupEl.style.visibility = "visible";
+        } else {
+          ungroupEl.style.visibility = "hidden";
+        }
       }
       view.render();
     };
@@ -520,6 +574,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       alive = false;
       passRef.current = null;
       actionsRef.current = null;
+      ungroupActRef.current = null;
       validator.dispose();
       window.clearTimeout(noticeTimer);
       cancelAnimationFrame(raf);
@@ -550,6 +605,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         <div className="table3d-canvas" ref={mountRef} />
       </div>
       <div className="table3d-selection" ref={selectionRef} />
+      <button className="table3d-ungroup" ref={ungroupBtnRef} onClick={() => ungroupActRef.current?.()}>
+        拆开
+      </button>
       <button className="table3d-back" onClick={onBack}>
         ← 返回
       </button>

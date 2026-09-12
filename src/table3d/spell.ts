@@ -32,7 +32,8 @@ export function spellSelection(loose: LooseSlots, selected: Iterable<number>): S
   let count = 0;
 
   for (const e of loose) {
-    if (!e || !picked.has(e.tileId)) continue;
+    // 暗词里的牌不单独参与推导（它们不会被选中，这里是第二道保险，见 TableView.inGroup）
+    if (!e || !picked.has(e.tileId) || e.groupId !== undefined) continue;
     count++;
     tiles += e.tile;
     if (isWildTile(e.tile)) {
