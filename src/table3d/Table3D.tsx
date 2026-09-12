@@ -6,6 +6,7 @@ import { AssetLoader } from "./asset-loader";
 import { WILD_CANDIDATES } from "./atlas";
 import { SelectionValidator, type CheckState } from "./check";
 import { ConfirmGate } from "./confirm";
+import { matchChi, type ChiMatch } from "./chi";
 import { canDiscard, canPass, type DiscardIntent } from "./discard";
 import { WORLD_SIZE } from "./layout";
 import { MainView } from "./main-view";
@@ -117,6 +118,22 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   const [revealArmed, setRevealArmed] = useState(false);
   /** 缩写的全称输入。选区一变就清空 */
   const [expansion, setExpansion] = useState("");
+  // ---- T6.1 吃牌（输入框模式）----
+  /** 现在是不是吃牌决策（只读 pending），以及打出的是哪张 */
+  const [chiTurn, setChiTurn] = useState(false);
+  const [chiTile, setChiTile] = useState("");
+  /** 点了 [吃]：出输入框 */
+  const [chiOpen, setChiOpen] = useState(false);
+  const [chiInput, setChiInput] = useState("");
+  /** 输入框的内容也放一份在 ref 里，mainLoop 每帧读它，不必等 React 重渲染 */
+  const chiInputRef = useRef("");
+  /** 对应失败的原因（凑不出 / 白搭超额）；对应成功时为 null */
+  const [chiFail, setChiFail] = useState<Exclude<ChiMatch, { ok: true }>["reason"] | null>(null);
+  /** 吃牌校验的结果（第二个校验器写） */
+  const [chiCheck, setChiCheck] = useState<CheckState>({ status: "idle" });
+  const [chiArmed, setChiArmed] = useState(false);
+  const [chiExpansion, setChiExpansion] = useState("");
+  const chiRef = useRef<{ open: () => void; cancel: () => void; reveal: (expansion: string) => void } | null>(null);
   const actionsRef = useRef<{
     group: (expansion: string) => void;
     reveal: (expansion: string) => void;
@@ -387,6 +404,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       setMyTurn(canDiscard(pending, false));
       setBusyUi(busy);
       setRevealTurn(pending?.kind === "reveal");
+      setChiTurn(pending?.kind === "chi");
+      setChiTile(pending?.kind === "chi" ? (pending.tile ?? "") : "");
       setFinished(finishedFlag);
     };
 
@@ -396,6 +415,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       matchId = env.matchId;
       pending = env.pending;
       finishedFlag = env.matchFinished || env.result !== null;
+      // 决策不再是吃牌了（吃成了、过了、或者别家先胡了），输入框和高亮一起收掉
+      if (pending?.kind !== "chi") closeChi();
       setWallLeft(env.state.wallLeft);
       refreshControls();
     };
@@ -436,7 +457,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     };
 
     passRef.current = () => {
-      if (canPass(pending, busy)) void act({ kind: "pass" });
+      if (!canPass(pending, busy)) return;
+      closeChi();
+      void act({ kind: "pass" });
     };
 
     // ---- T4.1 单词校验 ----
@@ -465,6 +488,84 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         if (alive) showNotice(e instanceof ApiError ? e.message : describeFailure(e));
       },
     );
+
+    // ---- T6.1 吃牌 ----
+    // 结果同样只有一个来源：mainLoop 每帧用输入框的内容对应一次，喂给第二个校验器。
+    // 对应失败（凑不出 / 白搭超额）不发请求，只记原因；不列候选、不说差哪张（教学红线）
+    let chiOpenFlag = false;
+    let chiMatch: ChiMatch = { ok: false, reason: "empty" };
+    let chiKey = "";
+    let chiCurrent: CheckState = { status: "idle" };
+    const chiGate = new ConfirmGate();
+    const chiValidator = new SelectionValidator(
+      (tiles, word) =>
+        matchId && pending?.kind === "chi" && pending.tile
+          ? api.validate(matchId, tiles, word, pending.tile)
+          : Promise.reject(new Error("现在不是吃牌决策")),
+      (state) => {
+        if (!alive) return;
+        chiCurrent = state;
+        setChiCheck(state);
+      },
+      (e) => {
+        if (alive) showNotice(e instanceof ApiError ? e.message : describeFailure(e));
+      },
+    );
+    function closeChi(): void {
+      if (!chiOpenFlag && chiInputRef.current === "") return;
+      chiOpenFlag = false;
+      chiInputRef.current = "";
+      chiKey = "";
+      chiGate.reset();
+      setChiOpen(false);
+      setChiInput("");
+      setChiFail(null);
+      setChiArmed(false);
+      setChiExpansion("");
+      tableView?.setChiHighlight([]);
+    }
+    /** mainLoop 每帧调：对应 → 高亮 → 校验。key 没变什么都不做 */
+    const updateChi = () => {
+      if (!tableView) return;
+      if (!chiOpenFlag || pending?.kind !== "chi" || !pending.tile) {
+        chiValidator.update({ kind: "none" });
+        return;
+      }
+      const input = chiInputRef.current;
+      chiMatch = matchChi(tableView.looseSlots, input, pending.tile);
+      const key = `${input}|${chiMatch.ok ? chiMatch.tiles : chiMatch.reason}`;
+      if (key === chiKey) return;
+      if (chiKey.split("|")[0] !== input) setChiExpansion("");
+      chiKey = key;
+      chiGate.sync(key); // 输入一变就退回第一步
+      setChiArmed(false);
+      setChiFail(chiMatch.ok || chiMatch.reason === "empty" ? null : chiMatch.reason);
+      tableView.setChiHighlight(chiMatch.ok ? chiMatch.tileIds : []);
+      chiValidator.update(
+        chiMatch.ok ? { kind: "word", tiles: chiMatch.handTiles, word: input.trim().toLowerCase() } : { kind: "none" },
+      );
+    };
+    chiRef.current = {
+      open: () => {
+        if (pending?.kind !== "chi") return;
+        chiOpenFlag = true;
+        setChiOpen(true);
+      },
+      cancel: () => closeChi(),
+      reveal: (exp) => {
+        if (!chiMatch.ok || chiCurrent.status !== "done" || !chiCurrent.result.valid) return;
+        if (chiCurrent.result.canReveal === false || pending?.kind !== "chi" || busy) return;
+        // 亮词不可撤回：第一次点只上膛，不发请求
+        if (!chiGate.press()) {
+          setChiArmed(chiGate.armed);
+          return;
+        }
+        setChiArmed(false);
+        const { tiles, tileIds } = chiMatch;
+        const word = chiCurrent.word;
+        void submit((id) => api.act(id, { kind: "chi", tiles, word, expansion: exp || undefined }), tileIds);
+      },
+    };
 
     // ---- T4.2 组暗词 / 亮词 / 取消 ----
     // 规则一律交给服务端：选中的牌里有暗词的牌、亮词数量到上限这类情况，前端不预判，400 原样显示
@@ -549,6 +650,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         if (!selectStart3) {
           validator.update(spellSelection(tableView.looseSlots, tableView.selectedTileIds()));
         }
+        updateChi();
         // 选中的牌描金边。objectView.selectedObjects 每次提交都会重填，交同一个数组即可
         if (objectView) {
           view.updateOutline(objectView.selectedObjects);
@@ -629,6 +731,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       alive = false;
       passRef.current = null;
       actionsRef.current = null;
+      chiRef.current = null;
+      chiValidator.dispose();
       ungroupActRef.current = null;
       wildActRef.current = null;
       validator.dispose();
@@ -651,6 +755,17 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       view.dispose();
     };
   }, []);
+
+  /** 吃牌打出的那张怎么显示（白搭画星） */
+  const chiLabel = chiTile === "1" || chiTile === "2" ? "★" : chiTile.toUpperCase();
+  /** 吃牌的 [亮词] 能不能点：对应上了、校验 ✓、能亮、缩写填了全称、没有请求在途 */
+  const chiReady =
+    !busyUi &&
+    chiFail === null &&
+    chiCheck.status === "done" &&
+    chiCheck.result.valid &&
+    chiCheck.result.canReveal !== false &&
+    !(chiCheck.result.isAbbr && chiExpansion.trim() === "");
 
   /** 缩写还没填全称：组暗词、亮词都不能提交 */
   const needExpansion =
@@ -784,6 +899,76 @@ export function Table3D({ onBack }: { onBack: () => void }) {
               <span className="table3d-act-note">亮出的词至少 3 个字母</span>
             )}
           </>
+        )}
+        {/* T6.1 吃牌（输入框模式）。不读 pending.hints、不列候选：玩家自己想出词来 */}
+        {chiTurn && !chiOpen && (
+          <button className="table3d-act-btn" disabled={busyUi} onClick={() => chiRef.current?.open()}>
+            吃 {chiLabel}
+          </button>
+        )}
+        {chiTurn && chiOpen && (
+          <div className="table3d-chi">
+            <div className="table3d-act-row">
+              <input
+                className="table3d-chi-input"
+                autoFocus
+                value={chiInput}
+                onChange={(e) => {
+                  chiInputRef.current = e.target.value;
+                  setChiInput(e.target.value);
+                }}
+                placeholder={`用打出的 ${chiLabel} 拼一个词`}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <button
+                className={`table3d-act-btn${chiArmed ? " confirm" : ""}`}
+                disabled={!chiReady}
+                onClick={() => chiRef.current?.reveal(chiExpansion.trim())}
+              >
+                {chiArmed ? `确认亮出 ${chiInput.trim().toUpperCase()}（不可撤回）` : "亮词"}
+              </button>
+              <button className="table3d-act-btn" onClick={() => chiRef.current?.cancel()}>
+                取消
+              </button>
+            </div>
+            <div className="table3d-chi-status">
+              {chiFail === "missing" && <span className="table3d-check-bad">手里凑不出这个词</span>}
+              {chiFail === "tooManyWilds" && <span className="table3d-check-bad">一个词最多只能用一张白搭</span>}
+              {chiFail === "discardUnused" && <span className="table3d-check-bad">吃牌必须用上打出的那张</span>}
+              {chiFail === null && chiCheck.status === "checking" && (
+                <span className="table3d-check-meta">校验中…</span>
+              )}
+              {chiFail === null &&
+                chiCheck.status === "done" &&
+                (chiCheck.result.valid ? (
+                  <>
+                    <span className="table3d-check-ok">✓</span>
+                    <span className="table3d-check-meta">
+                      {chiCheck.result.score} 分
+                      {chiCheck.result.inTier && " · 词库内 +10"}
+                      {(chiCheck.result.drawCount ?? 0) > 0 && ` · 亮出可补摸 ${chiCheck.result.drawCount} 张`}
+                    </span>
+                  </>
+                ) : (
+                  <span className="table3d-check-bad">✗ 不是单词</span>
+                ))}
+            </div>
+            {chiFail === null && chiCheck.status === "done" && chiCheck.result.valid && chiCheck.result.isAbbr && (
+              <label className="table3d-expansion">
+                <span>「{chiCheck.display}」是缩写，请拼出全称：</span>
+                <input
+                  value={chiExpansion}
+                  onChange={(e) => setChiExpansion(e.target.value)}
+                  placeholder="如 television"
+                  spellCheck={false}
+                />
+              </label>
+            )}
+            {chiFail === null && chiCheck.status === "done" && chiCheck.result.valid && chiCheck.result.canReveal === false && (
+              <span className="table3d-act-note">亮出的词至少 3 个字母</span>
+            )}
+          </div>
         )}
         {passable && (
           <button className="table3d-pass" onClick={() => passRef.current?.()}>

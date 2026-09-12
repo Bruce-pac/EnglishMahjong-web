@@ -27,6 +27,11 @@ export interface Render {
   bottom: boolean;
   /** 属于某个暗词（T4.3）：交给第二个 OutlinePass 描暗词框。可省略，默认不是 */
   grouped?: boolean;
+  /**
+   * 吃牌时会用掉的牌（T6.1）：暖色 emissive 高亮，让玩家看清会用掉哪几张。
+   * 故意不复用 selected——选中会触发框选校验。可省略，默认不是
+   */
+  highlighted?: boolean;
 }
 
 /**
@@ -138,7 +143,8 @@ export class ObjectView {
     this.groupedObjects.splice(0);
     for (const thing of things) {
       // OutlinePass 描不了 InstancedMesh 里的某一个实例，所以暗词的牌也得走 Custom 轨
-      const custom = thing.hovered || thing.selected || thing.held || thing.bottom || !!thing.grouped;
+      const custom =
+        thing.hovered || thing.selected || thing.held || thing.bottom || !!thing.grouped || !!thing.highlighted;
       if (!custom) {
         this.tileGroup.setSimple(thing.thingIndex, thing.place.position, thing.place.rotation);
         continue;
@@ -161,6 +167,8 @@ export class ObjectView {
       // Autotable 用 0.05，但我们的环境光是 1.45、牌面本来就很亮，0.05 只亮了 18/255，
       // 肉眼几乎看不出来。悬停要一眼可见；选中另有金色描边（OutlinePass），两者不会混
       if (thing.hovered) material.emissive.setRGB(HOVER_GLOW, HOVER_GLOW, HOVER_GLOW);
+      // 吃牌要用掉的牌：暖色，和悬停的灰白提亮分得开；悬停在它上面时以它为准
+      if (thing.highlighted) material.emissive.setRGB(0.3, 0.2, 0.0);
       if (thing.bottom) material.color.setRGB(0.8, 0.8, 0.8);
       if (thing.selected) this.selectedObjects.push(obj);
       if (thing.grouped) this.groupedObjects.push(obj);

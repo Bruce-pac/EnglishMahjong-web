@@ -1940,6 +1940,35 @@ button.footer-link {
   background: #fff8d6;
 }
 
+/* T6.1 吃牌面板：输入框 + [亮词] [取消] + 状态行。放在左下角操作区里 */
+.table3d-chi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(10, 30, 20, 0.9);
+}
+.table3d-chi-input {
+  width: 150px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #6c9a82;
+  background: #0d241a;
+  color: #e8f3ec;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.table3d-chi-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-height: 18px;
+  font-size: 14px;
+}
+
 /* T4.1 校验条。位置由外层 .table3d-actions 决定 */
 .table3d-check {
   max-width: 360px;

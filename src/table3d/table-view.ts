@@ -113,6 +113,8 @@ export class TableView {
    * 暗词被拆开后对账会清掉 key，这里自然就找不到了（[拆开] 按钮随之消失）
    */
   private focusedKey: string | null = null;
+  /** 吃牌时会用掉的牌（T6.1），按 tileId 记。只是高亮，不是选中 */
+  private chiTiles = new Set<number>();
 
   /** 最近一次的 envelope。拖放落下后要拿它的 state 重新 layout、判断要不要存档 */
   private lastEnv: Envelope | null = null;
@@ -661,6 +663,7 @@ export class TableView {
         bottom: false,
         // 滑动过程中暗词框也得在，不然一拖就闪一下
         grouped: this.entryOf(thing.index)?.groupId !== undefined,
+        highlighted: this.chiTiles.has(this.entryOf(thing.index)?.tileId ?? -1),
       });
     }
     if (!this.held && this.slides.size === 0) this.drawn.clear();
@@ -700,7 +703,20 @@ export class TableView {
       const tileId = this.tileIdOf(r.thingIndex);
       r.selected = tileId !== null && this.selectedTiles.has(tileId);
       r.grouped = this.entryOf(r.thingIndex)?.groupId !== undefined;
+      r.highlighted = tileId !== null && this.chiTiles.has(tileId);
     }
+  }
+
+  /**
+   * 吃牌时高亮会用掉的那几张（T6.1）。集合没变就不重新提交。
+   * 离开散牌区的 tileId 自然就高亮不到了（refreshFlags 按当前 LooseSlots 查）
+   */
+  setChiHighlight(tileIds: readonly number[]): void {
+    const next = new Set(tileIds);
+    if (next.size === this.chiTiles.size && [...next].every((id) => this.chiTiles.has(id))) return;
+    this.chiTiles = next;
+    this.refreshFlags();
+    this.objectView.updateThings(this.renders);
   }
 
   /** 这张牌（Thing 编号）在 LooseSlots 里的 entry。不在自己散牌区返回 null */
