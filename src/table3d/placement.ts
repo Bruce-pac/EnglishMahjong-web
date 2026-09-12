@@ -7,7 +7,7 @@
  */
 
 import type { State, Word } from "../api";
-import { FACE_COUNT, letterFace, WILD_CONSONANT, WILD_VOWEL, wildFace } from "./atlas";
+import { FACE_COUNT, letterFace, WILD_CANDIDATES, WILD_CONSONANT, WILD_VOWEL, wildFace } from "./atlas";
 import {
   DISCARD_COLS,
   DISCARD_ROWS,
@@ -68,11 +68,6 @@ const ONLY = 0;
  */
 const UNKNOWN_FACE = 0;
 
-const VOWELS = "aeiou";
-const CONSONANTS = "bcdfghjklmnpqrstvwxyz";
-/** 与 `rules.py:11` 的 WILD_CANDIDATES 同一份约定 */
-const WILD_CANDIDATES: Record<string, string> = { "1": VOWELS, "2": CONSONANTS };
-
 /** 一张牌的牌面编号。白搭已声明就画声明的那个字母，未声明画星 */
 export function faceOf(tile: string, wildLetter: string | undefined, lower: boolean): number {
   if (tile === "1" || tile === "2") {
@@ -111,7 +106,7 @@ export function orderByWord(tiles: string, word: string): Array<{ tile: string; 
   for (let i = 0; i < word.length; i++) {
     if (out[i]) continue;
     const letter = word[i].toLowerCase();
-    const at = pool.findIndex((t) => WILD_CANDIDATES[t]?.includes(letter));
+    const at = pool.findIndex((t) => (t === "1" || t === "2") && WILD_CANDIDATES[t].includes(letter));
     if (at < 0) return [...tiles].map((t) => ({ tile: t })); // 配不出来，原样摆
     out[i] = { tile: pool[at], wild: letter };
     pool.splice(at, 1);

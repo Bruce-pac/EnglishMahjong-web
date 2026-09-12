@@ -94,5 +94,17 @@ describe("groupKey", () => {
     expect(groupOf(leftA)).toBe(1);
     expect(groupOf(rightA)).toBe(0);
   });
-});
 
+  it("暗词里的白搭：配对时按 word 反推出字母（COD 的白搭是 O），拆开之后字母保留", () => {
+    const hand = ["1", "c", "d", "x"];
+    const r0 = rebuildLoose({ hand, groups: [] }, 1);
+    const cod: Word = { tiles: "1cd", word: "cod" };
+    let r = reconcileLoose({ hand, groups: [cod] }, r0.slots, r0.nextTileId);
+    const wild = () => r.slots.find((e) => e?.tile === "1")!;
+    expect(wild().groupId).toBe(0);
+    expect(wild().wildLetter).toBe("o");
+    r = reconcileLoose({ hand, groups: [] }, r.slots, r.nextTileId);
+    expect(wild().groupId).toBeUndefined();
+    expect(wild().wildLetter).toBe("o");
+  });
+});

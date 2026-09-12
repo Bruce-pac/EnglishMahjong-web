@@ -21,7 +21,8 @@ import { spellKey, type Spell } from "./spell";
  */
 export type CheckState =
   | { status: "idle" }
-  | { status: "needWild"; key: string; display: string }
+  | { status: "tooManyWilds"; key: string; display: string }
+  | { status: "needWild"; key: string; display: string; wild: { tileId: number; kind: "1" | "2" } }
   | { status: "checking"; key: string; display: string; tiles: string; word: string }
   | { status: "done"; key: string; display: string; tiles: string; word: string; result: Validation };
 
@@ -49,8 +50,12 @@ export class SelectionValidator {
       this.onChange({ status: "idle" });
       return;
     }
+    if (spell.kind === "tooManyWilds") {
+      this.onChange({ status: "tooManyWilds", key, display: spell.display });
+      return;
+    }
     if (spell.kind === "needWild") {
-      this.onChange({ status: "needWild", key, display: spell.display });
+      this.onChange({ status: "needWild", key, display: spell.display, wild: spell.wild });
       return;
     }
 

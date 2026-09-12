@@ -44,6 +44,13 @@ const VOWELS = "aeiou";
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz";
 const CONSONANTS = [...ALPHABET].filter((c) => !VOWELS.includes(c)).join("");
 
+/**
+ * 白搭能代替哪些字母——**3D 这边唯一的一份**，与 `rules.py:11` 的 WILD_CANDIDATES 同一份约定。
+ * 元音白搭（`"1"`）5 个，辅音白搭（`"2"`）21 个。字母选择器、`orderByWord`、`wildFace` 共用，
+ * 顺序也就是图集里声明白搭那几段的顺序
+ */
+export const WILD_CANDIDATES: Readonly<Record<"1" | "2", string>> = { "1": VOWELS, "2": CONSONANTS };
+
 /** 元音白搭（`rules.py` 里内部字符是 `"1"`）未声明时的牌面编号 */
 export const WILD_VOWEL = 52;
 /** 辅音白搭（内部字符 `"2"`）未声明时的牌面编号 */
@@ -66,12 +73,11 @@ export function letterFace(letter: string, lower = false): number {
  */
 export function wildFace(kind: "1" | "2", letter: string, lower = false): number {
   const lc = letter.toLowerCase();
+  const i = WILD_CANDIDATES[kind].indexOf(lc);
   if (kind === "1") {
-    const i = VOWELS.indexOf(lc);
     if (i < 0) throw new Error(`元音白搭不能代替 ${letter}`);
     return 54 + (lower ? 5 : 0) + i;
   }
-  const i = CONSONANTS.indexOf(lc);
   if (i < 0) throw new Error(`辅音白搭不能代替 ${letter}`);
   return 64 + (lower ? 21 : 0) + i;
 }

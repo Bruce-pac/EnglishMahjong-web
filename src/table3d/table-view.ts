@@ -28,6 +28,7 @@ import type { Envelope } from "../api";
 import { TILE_COUNT } from "./layout";
 import {
   compactGroup,
+  declareWild,
   groupKeyOf,
   insertLoose,
   markGroup,
@@ -50,6 +51,7 @@ import type { Slot } from "./slot";
 import { Thing } from "./thing";
 import { Size, ThingType } from "./types";
 import { rectangleOverlap } from "./utils";
+import { WILD_CANDIDATES } from "./atlas";
 
 /** 被挤开 / 落下的牌滑过去用多久（Autotable 的 SHIFT_TIME）。完整动画层是 T5.1 */
 export const SHIFT_TIME = 100;
@@ -362,6 +364,55 @@ export class TableView {
    */
   inGroup(thingIndex: number): boolean {
     return this.entryOf(thingIndex)?.groupId !== undefined;
+  }
+
+  // ================= T4.4 白搭赋值 =================
+
+  /**
+   * 双击赋值要弹选择器的那张白搭：tileId、种类、选择器锚点（牌顶面上方，`mainGroup` 局部坐标，
+   * 调用方每帧用 `mouseUi.project` 投到屏幕）。
+   * 不是白搭、不在散牌区、或是暗词里的白搭（它的字母由暗词的 word 决定）都返回 null
+   */
+  wildPickerAt(thingIndex: number): { tileId: number; kind: "1" | "2"; anchor: Vector3 } | null {
+    const e = this.entryOf(thingIndex);
+    if (!e || (e.tile !== "1" && e.tile !== "2") || e.groupId !== undefined) return null;
+    return { tileId: e.tileId, kind: e.tile, anchor: this.anchorAbove(thingIndex) };
+  }
+
+  /** 按 tileId 找回选择器的锚点。那张牌离开了散牌区（打出、亮出）或进了暗词就返回 null，选择器随之关闭 */
+  wildAnchorOf(tileId: number): Vector3 | null {
+    const thing = this.looseThings().find((t) => this.entryOf(t.index)?.tileId === tileId);
+    if (!thing || this.inGroup(thing.index)) return null;
+    return this.anchorAbove(thing.index);
+  }
+
+  private anchorAbove(thingIndex: number): Vector3 {
+    const place = this.things[thingIndex]!.place();
+    const anchor = place.position.clone();
+    anchor.z += place.size.z / 2;
+    anchor.y += place.size.y / 2;
+    return anchor;
+  }
+
+  /**
+   * 给白搭定字母（T4.4）。声明挂在 tileId 上、会存档，之后随时可以改。
+   * 只换牌面，走 `updateThingTypes` 的快路径，不整组重建。
+   * 暗词里的白搭、普通字母牌、不在散牌区的牌、字母不在本类候选里，一律返回 false、什么都不改
+   */
+  declareWildTile(tileId: number, letter: string): boolean {
+    const e = this.loose.find((x) => x?.tileId === tileId);
+    if (!e || (e.tile !== "1" && e.tile !== "2") || e.groupId !== undefined) return false;
+    const lc = letter.toLowerCase();
+    if (!WILD_CANDIDATES[e.tile].includes(lc)) return false;
+    this.loose = declareWild(this.loose, tileId, lc);
+    this.saveAndCommit();
+    return true;
+  }
+
+  /** 双击那张牌定字母：同 `declareWildTile`，入参是 Thing 编号 */
+  declareWildAt(thingIndex: number, letter: string): boolean {
+    const e = this.entryOf(thingIndex);
+    return e ? this.declareWildTile(e.tileId, letter) : false;
   }
 
   /** 右键打牌：这张牌（Thing 编号）的打牌意图。不在自己散牌区、或是暗词里的牌，返回 null */

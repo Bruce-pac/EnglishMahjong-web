@@ -11,6 +11,7 @@
 
 import type { Me, Word } from "../api";
 import { LOOSE_SLOTS } from "./layout";
+import { orderByWord } from "./placement";
 
 export interface LooseEntry {
   /** 前端自有的牌张 id。一张牌从进散牌区到离开始终不变，**永不回收**（见下） */
@@ -133,6 +134,18 @@ function assignGroupIds(slots: LooseSlots, groups: readonly Word[]): void {
     for (const e of picked) {
       e.groupId = gi;
       e.groupKey = key;
+    }
+
+    // 暗词里的白搭：字母由暗词的 word 决定（T4.4）。按 word 反推哪一位是白搭代替的，
+    // 写进 wildLetter——2.5D 组的暗词、dev 后门摆的暗词原本都只显示 ★。
+    // 拆开之后不清，字母保留，玩家可以再改
+    const wildCells = orderByWord(g.tiles, g.word).filter((c) => c.wild !== undefined);
+    for (const e of picked) {
+      if (e.tile !== "1" && e.tile !== "2") continue;
+      const at = wildCells.findIndex((c) => c.tile === e.tile);
+      if (at < 0) continue;
+      e.wildLetter = wildCells[at].wild;
+      wildCells.splice(at, 1);
     }
   });
 

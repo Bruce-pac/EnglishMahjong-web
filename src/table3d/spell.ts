@@ -10,11 +10,22 @@
 
 import type { LooseSlots } from "./loose-reconcile";
 
+/**
+ * 一个词最多用几张白搭。对应 `rules.py:36`，照 2.5D `Hand.tsx:271` 的做法在前端当场拦——
+ * 服务端也会拒，但当场说清楚比等 400 好：不发请求，也不弹字母选择器
+ */
+export const MAX_WILDS_PER_WORD = 1;
+
 export type Spell =
   /** 不足 2 张：不校验 */
   | { kind: "none" }
-  /** 含还没声明字母的白搭：不发请求。`display` 里白搭显示成 ★ */
-  | { kind: "needWild"; display: string }
+  /** 白搭超过 `MAX_WILDS_PER_WORD` 张（不管定没定字母）：不发请求，也不弹选择器 */
+  | { kind: "tooManyWilds"; display: string }
+  /**
+   * 含一张还没声明字母的白搭：不发请求。`display` 里白搭显示成 ★；
+   * `wild` 是那张白搭，操作区据此就地弹字母选择器（T4.4）
+   */
+  | { kind: "needWild"; display: string; wild: { tileId: number; kind: "1" | "2" } }
   /** 可以校验：`tiles` 是牌面（白搭写 1/2），`word` 是读出来的词（白搭写它声明的字母），一律小写 */
   | { kind: "word"; tiles: string; word: string };
 
@@ -28,7 +39,8 @@ export function spellSelection(loose: LooseSlots, selected: Iterable<number>): S
   let tiles = "";
   let word = "";
   let display = "";
-  let undeclared = false;
+  let undeclared: { tileId: number; kind: "1" | "2" } | null = null;
+  let wilds = 0;
   let count = 0;
 
   for (const e of loose) {
@@ -37,11 +49,12 @@ export function spellSelection(loose: LooseSlots, selected: Iterable<number>): S
     count++;
     tiles += e.tile;
     if (isWildTile(e.tile)) {
+      wilds++;
       if (e.wildLetter) {
         word += e.wildLetter.toLowerCase();
         display += e.wildLetter.toUpperCase();
       } else {
-        undeclared = true;
+        undeclared ??= { tileId: e.tileId, kind: e.tile as "1" | "2" };
         display += "★";
       }
     } else {
@@ -51,7 +64,8 @@ export function spellSelection(loose: LooseSlots, selected: Iterable<number>): S
   }
 
   if (count < 2) return { kind: "none" };
-  if (undeclared) return { kind: "needWild", display };
+  if (wilds > MAX_WILDS_PER_WORD) return { kind: "tooManyWilds", display };
+  if (undeclared) return { kind: "needWild", display, wild: undeclared };
   return { kind: "word", tiles: tiles.toLowerCase(), word };
 }
 
@@ -60,8 +74,10 @@ export function spellKey(s: Spell): string {
   switch (s.kind) {
     case "none":
       return "none";
+    case "tooManyWilds":
+      return `tooManyWilds|${s.display}`;
     case "needWild":
-      return `needWild|${s.display}`;
+      return `needWild|${s.wild.tileId}|${s.display}`;
     case "word":
       return `word|${s.tiles}|${s.word}`;
   }

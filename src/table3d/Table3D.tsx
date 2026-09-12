@@ -3,6 +3,7 @@ import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2, Vector3 } fro
 import { Size, ThingType } from "./types";
 import { api, ApiError, type Envelope, type MatchConfig, type Pending } from "../api";
 import { AssetLoader } from "./asset-loader";
+import { WILD_CANDIDATES } from "./atlas";
 import { SelectionValidator, type CheckState } from "./check";
 import { ConfirmGate } from "./confirm";
 import { canDiscard, canPass, type DiscardIntent } from "./discard";
@@ -84,6 +85,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   /** 单击暗词后出现在组旁的 [拆开]（T4.3）。每帧按投影位置定位，所以直接改 DOM 而不走 React state */
   const ungroupBtnRef = useRef<HTMLButtonElement>(null);
   const ungroupActRef = useRef<(() => void) | null>(null);
+  /** 双击白搭弹出的字母选择器（T4.4）。字母表由 React 渲染，位置每帧直接改 DOM */
+  const [wildPicker, setWildPicker] = useState<{ tileId: number; kind: "1" | "2" } | null>(null);
+  const wildPickerRef = useRef<HTMLDivElement>(null);
+  /** 选定一个字母：给那张白搭定字母（选择器和校验条里的就地选择器共用） */
+  const wildActRef = useRef<((tileId: number, letter: string) => void) | null>(null);
   /** 出错了显示什么；`retry` 有值时给一个「重试」按钮（资源加载失败时没有，重试也没用） */
   const [failure, setFailure] = useState<{ message: string; retry?: () => void } | null>(null);
   const [wallLeft, setWallLeft] = useState<number | null>(null);
@@ -175,6 +181,32 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     let selectDown: { x: number; y: number } | null = null;
     let selectMoved = false;
 
+    // ---- T4.4 双击白搭赋值 ----
+    /** 选择器正开着的那张白搭。null = 没开 */
+    let pickerTile: number | null = null;
+    const openWildPicker = (tileId: number, kind: "1" | "2") => {
+      pickerTile = tileId;
+      setWildPicker({ tileId, kind });
+    };
+    const closeWildPicker = () => {
+      if (pickerTile === null) return;
+      pickerTile = null;
+      setWildPicker(null);
+    };
+    // 双击散牌区里的白搭 → 在牌旁弹字母选择器。双击普通字母牌、暗词里的白搭都不响应
+    //
+    // 不能读 hoveredThing：双击的两次按下都会先进入拖动（dragStart 清掉悬停），悬停要到下一帧
+    // 渲染时才恢复，而 dblclick 紧跟在第二次松手之后、同一个任务里触发——那时悬停还是 null。
+    // 所以当场拿鼠标坐标拾取一次
+    const onDblClick = () => {
+      if (!tableView || !mouseUi || tableView.dragging || !hasMouse) return;
+      mouseUi.updateObjects(tableView.pickables);
+      const picked = mouseUi.pick(mouse2, view.camera);
+      if (picked === null) return;
+      const info = tableView.wildPickerAt(picked);
+      if (info) openWildPicker(info.tileId, info.kind);
+    };
+
     // ---- T4.3 单击暗词 ----
     /** 在牌上按下的位置和那张牌。松手时没挪动超过 3px 就算单击（和框选同一个阈值） */
     let tileDown: { x: number; y: number; thing: number } | null = null;
@@ -190,6 +222,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     // 在悬停的牌上按下 → 拿起（T3.2）。拖动平面抬到那张牌的顶面（研究笔记 §4.2）。
     // 在空白处按下 → 开始框选（T3.3）
     const onMouseDown = (e: MouseEvent) => {
+      // 在画面上按下（点别处、开始拖动）都关掉字母选择器。选择器本身在画布外面，点它不会走到这里
+      closeWildPicker();
       if (e.button !== 0 || !tableView || !mouseUi || !hasMouse) return;
       if (tableView.hoveredThing !== null) {
         const z = tableView.dragZ;
@@ -277,6 +311,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       // 输入框里打字不该把镜头晃起来（T6.1 的吃牌输入框就是个 input）
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "Escape") closeWildPicker();
       if (keys.has(e.key)) return;
       keys.add(e.key);
 
@@ -318,6 +353,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     mount.addEventListener("mouseleave", onMouseLeave);
     mount.addEventListener("mousedown", onMouseDown);
     mount.addEventListener("contextmenu", onContextMenu);
+    mount.addEventListener("dblclick", onDblClick);
     window.addEventListener("mouseup", onMouseUp);
     window.addEventListener("mousemove", onWindowMouseMove);
     window.addEventListener("keydown", onKeyDown);
@@ -472,6 +508,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       },
     };
 
+    wildActRef.current = (tileId, letter) => {
+      tableView?.declareWildTile(tileId, letter);
+      closeWildPicker();
+    };
+
     // [拆开]：成功后牌原地不动，只是框没了（groupKey 由对账清掉）
     ungroupActRef.current = () => {
       const info = tableView?.focusedGroupInfo();
@@ -512,6 +553,20 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         if (objectView) {
           view.updateOutline(objectView.selectedObjects);
           view.updateGroupOutline(objectView.groupedObjects);
+        }
+        // 字母选择器跟着那张白搭走；那张牌离开了散牌区（打出、亮出）就关掉
+        if (pickerTile !== null) {
+          const anchor = tableView.wildAnchorOf(pickerTile);
+          const el = wildPickerRef.current;
+          if (!anchor) {
+            closeWildPicker();
+          } else if (el) {
+            const p = mouseUi.project(anchor, view.camera);
+            const rect = view.canvas.getBoundingClientRect();
+            el.style.left = `${rect.left + ((p.x + 1) / 2) * rect.width}px`;
+            el.style.top = `${rect.top + ((1 - p.y) / 2) * rect.height}px`;
+            el.style.visibility = "visible";
+          }
         }
         // [拆开] 跟着暗词走：锚点每帧重新投影，镜头缩放、低头时也贴着组
         const focused = tableView.dragging ? null : tableView.focusedGroupInfo();
@@ -575,6 +630,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       passRef.current = null;
       actionsRef.current = null;
       ungroupActRef.current = null;
+      wildActRef.current = null;
       validator.dispose();
       window.clearTimeout(noticeTimer);
       cancelAnimationFrame(raf);
@@ -582,6 +638,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       mount.removeEventListener("mouseleave", onMouseLeave);
       mount.removeEventListener("mousedown", onMouseDown);
       mount.removeEventListener("contextmenu", onContextMenu);
+      mount.removeEventListener("dblclick", onDblClick);
       window.removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("mousemove", onWindowMouseMove);
       window.removeEventListener("keydown", onKeyDown);
@@ -608,6 +665,20 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       <button className="table3d-ungroup" ref={ungroupBtnRef} onClick={() => ungroupActRef.current?.()}>
         拆开
       </button>
+      {wildPicker && (
+        // 双击白搭弹出的字母选择器（T4.4）：元音白搭 5 个、辅音白搭 21 个
+        <div className="table3d-wild-picker" ref={wildPickerRef} role="dialog" aria-label="给白搭定字母">
+          {[...WILD_CANDIDATES[wildPicker.kind]].map((c) => (
+            <button
+              key={c}
+              className="table3d-wild-letter"
+              onClick={() => wildActRef.current?.(wildPicker.tileId, c)}
+            >
+              {c.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      )}
       <button className="table3d-back" onClick={onBack}>
         ← 返回
       </button>
@@ -635,8 +706,27 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           // 教学红线：只回答「是不是词」，不列候选词、不列变位词，也不读 pending.hints
           <div className="table3d-check" role="status">
             <span className="table3d-check-word">{check.display}</span>
+            {check.status === "tooManyWilds" && (
+              // 用户已定：两张白搭当场拦，不发请求、不弹选择器（MAX_WILDS_PER_WORD，对应 rules.py:36）
+              <span className="table3d-check-bad">一个词最多只能用一张白搭</span>
+            )}
             {check.status === "needWild" && (
-              <span className="table3d-check-meta">选中的白搭还没定字母，暂时校验不了</span>
+              // 兜底：选区里恰好有一张没定字母的白搭，就地选。声明挂在 tileId 上、会存档，不是临时的；
+              // 选定后推导随即变成单词，下一帧校验器自动去问服务端
+              <>
+                <span className="table3d-check-meta">选中的白搭还没定字母，选一个：</span>
+                <div className="table3d-wild-inline">
+                  {[...WILD_CANDIDATES[check.wild.kind]].map((c) => (
+                    <button
+                      key={c}
+                      className="table3d-wild-letter"
+                      onClick={() => wildActRef.current?.(check.wild.tileId, c)}
+                    >
+                      {c.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
             {check.status === "checking" && <span className="table3d-check-meta">校验中…</span>}
             {check.status === "done" &&

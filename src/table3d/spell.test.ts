@@ -49,7 +49,7 @@ describe("spellSelection", () => {
   it("未声明的白搭 → needWild，白搭显示成 ★", () => {
     const s = row("c2t1");
     const ids = [s[0]!.tileId, s[1]!.tileId, s[2]!.tileId];
-    expect(spellSelection(s, ids)).toEqual({ kind: "needWild", display: "C★T" });
+    expect(spellSelection(s, ids)).toEqual({ kind: "needWild", display: "C★T", wild: { tileId: s[1]!.tileId, kind: "2" } });
   });
 
   it("不足 2 张不校验（含 1 张未声明白搭的情况）", () => {
@@ -87,4 +87,13 @@ describe("spellSelection", () => {
     expect(spellKey(spellSelection(a, all(a)))).toBe(spellKey(spellSelection(row("cat"), all(a))));
     expect(spellKey(spellSelection(a, all(a)))).not.toBe(spellKey(spellSelection(b, all(b))));
   });
+
+  it("两张白搭（不管定没定字母）→ tooManyWilds，不弹选择器", () => {
+    let s = row("c12");
+    const all = s.flatMap((e) => (e ? [e.tileId] : []));
+    expect(spellSelection(s, all)).toEqual({ kind: "tooManyWilds", display: "C★★" });
+    s = declareWild(declareWild(s, s[1]!.tileId, "a"), s[2]!.tileId, "t");
+    expect(spellSelection(s, all)).toEqual({ kind: "tooManyWilds", display: "CAT" });
+  });
 });
+

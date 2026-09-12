@@ -1901,6 +1901,45 @@ button.footer-link {
   z-index: 7;
 }
 
+/* T4.4 白搭的字母选择器。双击弹出的那个贴在牌上方（left/top 由 Table3D 每帧写）；
+   校验条里的就地选择器用 .table3d-wild-inline，按钮样式两处共用 */
+.table3d-wild-picker {
+  position: fixed;
+  visibility: hidden;
+  transform: translate(-50%, calc(-100% - 6px));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: 250px;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px solid #6c9a82;
+  background: rgba(10, 30, 20, 0.94);
+  z-index: 8;
+}
+.table3d-wild-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 340px;
+}
+.table3d-wild-letter {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid #6c9a82;
+  background: #f3efe4;
+  color: #2b2b2b;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.table3d-wild-letter:hover {
+  background: #fff8d6;
+}
+
 /* T4.1 校验条。位置由外层 .table3d-actions 决定 */
 .table3d-check {
   max-width: 360px;

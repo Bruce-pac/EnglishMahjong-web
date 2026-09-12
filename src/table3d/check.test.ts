@@ -40,7 +40,7 @@ describe("SelectionValidator", () => {
 
   it("未声明白搭 → needWild，不发请求", () => {
     const h = harness();
-    h.v.update({ kind: "needWild", display: "C★T" });
+    h.v.update({ kind: "needWild", display: "C★T", wild: { tileId: 7, kind: "1" } });
     expect(h.validate).not.toHaveBeenCalled();
     expect(h.last()).toMatchObject({ status: "needWild", display: "C★T" });
   });
@@ -100,4 +100,12 @@ describe("SelectionValidator", () => {
     await flush();
     expect(h.last()).toMatchObject({ status: "done", key: "word|c1d|cod", tiles: "c1d", word: "cod" });
   });
+
+  it("两张白搭 → tooManyWilds，不发请求", () => {
+    const h = harness();
+    h.v.update({ kind: "tooManyWilds", display: "C★★" });
+    expect(h.validate).not.toHaveBeenCalled();
+    expect(h.last()).toMatchObject({ status: "tooManyWilds", display: "C★★" });
+  });
 });
+
