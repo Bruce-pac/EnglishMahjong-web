@@ -20,8 +20,14 @@ export interface LooseSave {
   matchId: string;
   loose: LooseSlots;
   display: { lowercase: boolean };
-  /** 单调发号器；tileId 永不回收（方案 §2 规则 3） */
+  /** 单调发号器；tileId 永不回收（方案 §2 规则 3），跨局也一样 */
   nextTileId: number;
+  /**
+   * 存档时是这一场的第几局（`gameIndexOf`，从 0 数；**不是** state.gamesPlayed——那个在结算时就加 1 了）。
+   * T6.3 加的可选字段：同一场的下一局 matchId 不变，刷新时读到上一局的存档，要靠它认出来、
+   * 不把上一局的散牌区身份带进新一局。没有这个字段的存档按「同一局」处理
+   */
+  gameIndex?: number;
   updatedAt: number;
 }
 

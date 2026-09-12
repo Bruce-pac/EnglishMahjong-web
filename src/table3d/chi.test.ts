@@ -3,7 +3,7 @@
 import { Group } from "three";
 import { describe, expect, it } from "vitest";
 import type { Envelope, State } from "../api";
-import { matchChi } from "./chi";
+import { matchChi, matchWin } from "./chi";
 import { fakeAssetLoader } from "./fake-assets";
 import { LOOSE_SLOTS } from "./layout";
 import { declareWild, type LooseSlots } from "./loose-reconcile";
@@ -134,6 +134,41 @@ describe("吃牌高亮", () => {
     view.setChiHighlight([]);
     const still = objectView.mainGroup.children.filter((c) => c.type === "Mesh" && c.visible && c.name !== "dropShadow");
     expect(still.filter((c) => (c as unknown as { material: { emissive?: { r: number } } }).material.emissive?.r! > 0.2)).toHaveLength(0);
+  });
+});
+
+describe("matchWin（胡牌：必须用光全部散牌）", () => {
+  it("散牌 A + 要胡的 T → AT：用光散牌才成功；暗词里的牌不算散牌", () => {
+    const s = row("cat.a", [[0, 1, 2]]);
+    expect(matchWin(s, "at", "t")).toEqual({ ok: true, handTiles: "a", tiles: "at", tileIds: [idAt(s, 4)] });
+  });
+
+  it("少用一张散牌 → notAll（不说剩的是哪张）", () => {
+    const s = row("ab");
+    expect(matchWin(s, "at", "t")).toEqual({ ok: false, reason: "notAll" });
+    // 吃牌就不要求用光
+    expect(matchChi(s, "at", "t")).toMatchObject({ ok: true });
+  });
+
+  it("重复字母：两张都得用上", () => {
+    const s = row("aab");
+    expect(matchWin(s, "baa", "t")).toEqual({ ok: false, reason: "discardUnused" });
+    expect(matchWin(s, "abat", "t")).toMatchObject({ ok: true, handTiles: "aba" });
+    expect(matchWin(s, "bat", "t")).toEqual({ ok: false, reason: "notAll" });
+  });
+
+  it("白搭：种类对得上才用；要胡的那张是白搭时最后认领", () => {
+    expect(matchWin(row("c1"), "cat", "t")).toMatchObject({ ok: true, handTiles: "c1", tiles: "c1t" });
+    expect(matchWin(row("c2"), "cat", "t")).toEqual({ ok: false, reason: "missing" });
+    expect(matchWin(row("ct"), "cat", "1")).toMatchObject({ ok: true, tiles: "ct1" });
+    // 要胡的元音白搭认领 A 之后，T 还缺一张辅音白搭 → 缺牌
+    expect(matchWin(row("c1"), "cat", "1")).toEqual({ ok: false, reason: "missing" });
+    // 两张元音白搭分别当 E、A，散牌也用光了，但白搭超额
+    expect(matchWin(row("t1"), "eat", "1")).toEqual({ ok: false, reason: "tooManyWilds" });
+  });
+
+  it("词比手里的牌还长 → missing", () => {
+    expect(matchWin(row("a"), "cart", "t")).toEqual({ ok: false, reason: "missing" });
   });
 });
 

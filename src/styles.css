@@ -1969,6 +1969,136 @@ button.footer-link {
   font-size: 14px;
 }
 
+/* T6.3 结算面板：盖住整个画面的 DOM 覆盖层 */
+.table3d-settle {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 20;
+}
+.table3d-settle-sheet {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 20px 24px;
+  border-radius: 12px;
+  background: #13251c;
+  border: 1px solid #3f6a55;
+  color: #e8f3ec;
+}
+.table3d-settle-title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.table3d-settle-tag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #6b5a1f;
+  color: #ffe9a8;
+  font-size: 13px;
+}
+.table3d-settle-note {
+  margin: 4px 0 10px;
+  color: #9fc3b0;
+  font-size: 13px;
+}
+.table3d-settle-rows {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.table3d-settle-rows td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(159, 195, 176, 0.18);
+  vertical-align: middle;
+}
+.table3d-settle-rows tr.me td {
+  background: rgba(255, 255, 153, 0.08);
+}
+.table3d-settle-rows .rank,
+.table3d-settle-rows .who,
+.table3d-settle-rows .pts,
+.table3d-settle-rows .total {
+  white-space: nowrap;
+}
+.table3d-settle-rows .trophy {
+  margin-left: 6px;
+  color: #ffe9a8;
+}
+.table3d-settle .empty {
+  color: #7fa08f;
+}
+.table3d-chip {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: #f3efe4;
+  color: #2b2b2b;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.table3d-chip.bad {
+  background: #f6d9d4;
+  color: #7a2418;
+}
+.table3d-settle-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.table3d-settle-profile .box {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.table3d-settle-profile .box-title {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.table3d-settle-profile .missed-lead {
+  margin-bottom: 6px;
+  color: #c9dccf;
+  font-size: 13px;
+}
+.table3d-mini-tile {
+  display: inline-block;
+  min-width: 18px;
+  margin: 0 2px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: #f3efe4;
+  color: #2b2b2b;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+.table3d-settle-final ol {
+  margin: 6px 0 0;
+  padding-left: 22px;
+}
+.table3d-settle-final li.me {
+  color: #ffff99;
+}
+.table3d-settle-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.table3d-act-btn.primary {
+  border-color: #ffff99;
+  color: #ffff99;
+}
+
 /* T4.1 校验条。位置由外层 .table3d-actions 决定 */
 .table3d-check {
   max-width: 360px;

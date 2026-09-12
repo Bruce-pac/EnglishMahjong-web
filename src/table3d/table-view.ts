@@ -63,6 +63,18 @@ interface Slide {
   start: number;
 }
 
+/**
+ * 这个 envelope 属于这一场的第几局（从 0 数）。
+ *
+ * **不能直接拿 `state.gamesPlayed`**：服务端在一局**结算时**就把它加 1，而不是下一局开出来时。
+ * 第 1 局进行中是 0、结算时变 1（带 result）、第 2 局开出来仍是 1（result 为空）。
+ * 直接比 gamesPlayed 的话，结算那一刻就会被当成换局，散牌区被清空重铺、白搭声明丢失。
+ * 所以带 result 的 envelope 还算上一局：减 1
+ */
+export function gameIndexOf(env: Envelope): number {
+  return env.result ? env.state.gamesPlayed - 1 : env.state.gamesPlayed;
+}
+
 /** Thing 池的全部下标。`assignThings` 每帧都要，建一次就够 */
 const ALL_THINGS = Array.from({ length: TILE_COUNT }, (_, i) => i);
 
@@ -94,6 +106,8 @@ export class TableView {
 
   private display: DisplayState = { lowercase: false };
   private matchId: string | null = null;
+  /** 这是这一场的第几局（从 0 数，见 `gameIndexOf`）。同一 matchId 下它变了 = 换局（T6.3） */
+  private gameIndex: number | null = null;
   /** 自己的座位号。只有这家散牌区的牌能拾取 */
   private mySeat = 0;
 
@@ -194,15 +208,23 @@ export class TableView {
       this.matchId = env.matchId;
       const saved = persist.load(env.matchId);
       if (saved) {
-        this.loose = saved.loose;
         this.nextTileId = saved.nextTileId;
         this.display = saved.display;
+        // 存档是同一场上一局留下的（别的标签页开了下一局、然后刷新）：散牌区身份不能带过来，
+        // 但 nextTileId 照用——tileId 跨局也永不回收
+        const sameGame = saved.gameIndex === undefined || saved.gameIndex === gameIndexOf(env);
+        this.loose = sameGame ? saved.loose : [];
       } else {
         this.loose = [];
         this.nextTileId = 1;
       }
       // 换局 = 桌上的牌全部换了一批，上一局的实例身份没有任何参考价值
       this.lastSlotName.clear();
+      this.gameIndex = gameIndexOf(env);
+    } else if (gameIndexOf(env) !== this.gameIndex) {
+      // 同一场换了一局，matchId 不变：兜底判定换局（[下一局] 之外，别的标签页开了下一局也会走到这里）
+      this.resetGame();
+      this.gameIndex = gameIndexOf(env);
     }
 
     const r =
@@ -225,6 +247,7 @@ export class TableView {
         loose: this.loose,
         display: this.display,
         nextTileId: this.nextTileId,
+        gameIndex: this.gameIndex ?? undefined,
       });
     }
 
@@ -826,6 +849,23 @@ export class TableView {
 
   get hoveredThing(): number | null {
     return this.hovered;
+  }
+
+  /**
+   * 换局（T6.3）：丢掉上一局的散牌区身份（tileId、白搭声明、groupKey）和一切本地交互状态，
+   * 下一次 apply 从零铺开。`nextTileId` **不归零**——tileId 永不回收，跨局也一样。
+   * 同一场的下一局 matchId 不变，`apply` 只在 matchId 变了才重读存档，所以要显式调它
+   */
+  resetGame(): void {
+    this.cancelDrag();
+    this.loose = [];
+    this.lastSlotName.clear();
+    this.selectedTiles.clear();
+    this.focusedKey = null;
+    this.chiTiles.clear();
+    this.hovered = null;
+    this.slides.clear();
+    this.drawn.clear();
   }
 
   /** 测试用：读回这一帧每个 Thing 停在哪儿 */
