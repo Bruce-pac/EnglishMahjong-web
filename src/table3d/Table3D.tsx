@@ -23,6 +23,8 @@ import { gameIndexOf, TableView } from "./table-view";
 import { dwellOf, pinnedFor, SAY_MS, sayOf, stepState } from "./replay";
 import { Animation } from "./utils";
 import { winMarkers, type WinMarker } from "./win-marker";
+import { actorOf, boardModel, nextReplayActor } from "./board-model";
+import { CenterBoard } from "./center-board";
 
 /**
  * 3D 页自己开局用的配置。
@@ -227,6 +229,12 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     mainGroup.add(table);
 
     const view = new MainView(mount, mainGroup);
+
+    // T2.2 中央记分盘：一张贴图平面，不进 Thing 池、不参与拾取。挂在 mainGroup 上，
+    // 按 p 切透视重建的只是相机与后处理链，场景树不动，盘还在
+    const board = new CenterBoard(document.createElement("canvas"), view.maxAnisotropy);
+    mainGroup.add(board.mesh);
+    board.mesh.updateMatrixWorld(true); // 全手动矩阵（main-view.ts），加进来要自己算一次
 
     // ---- 相机的三个连续参数（D13）----
     // 全部由 Animation 驱动，150ms 缓动。瞬切很晕，而且看不出是自己按的
@@ -542,6 +550,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         setReplayingUi(true);
         refreshControls();
         let s = shownState;
+        /** 记分盘上亮哪一边：当前事件的座位，没有座位的事件（exhausted）保持上一步 */
+        let replayActor: number | null = null;
         try {
           for (const e of env.events) {
             if (fastForward || !alive) break;
@@ -557,6 +567,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
             );
             if (own) consumed = [];
             s = next;
+            replayActor = nextReplayActor(replayActor, e);
+            const stepEnv = { ...env, state: next, pending: null, result: null };
+            board.update(boardModel(stepEnv, actorOf(stepEnv, replayActor)));
             const line = sayOf(e);
             if (line && e.seat !== undefined) say(e.seat, line);
             // 牌 180ms 飞到位，剩下的时间静止；吃、亮词、胡停得更久，气泡读得完
@@ -602,6 +615,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         lastClaimSig = claimSig;
       }
       setWallLeft(env.state.wallLeft);
+      // 回放结束（或没有回放）：按真 envelope 决定亮哪边——结算不亮、有 pending 亮自己、其余照 turn
+      board.update(boardModel(env, actorOf(env, null)));
       setHintsOn(env.state.config.hints);
       hintsOnFlag = env.state.config.hints;
       // 提示：决策换了（摸了新牌、轮到别家）就清掉点过的词、收起列表、取消高亮
@@ -1042,6 +1057,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       mouseUi?.dispose();
       objectView?.dispose();
       tableGeometry.dispose();
+      board.dispose();
       tableMaterial.dispose();
       view.dispose();
     };
@@ -1352,7 +1368,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           ? failure
             ? ""
             : "发牌中…"
-          : `${myTurn ? "轮到你出牌：拖到牌河或右键 · " : ""}牌墙剩 ${wallLeft} 张 · 空格 低头 · z / x 缩放 · p 切透视 · 拖空白处框选`}
+          : `${myTurn ? "轮到你出牌：拖到牌河或右键 · " : ""}空格 低头 · z / x 缩放 · p 切透视 · 拖空白处框选`}
       </div>
     </div>
   );

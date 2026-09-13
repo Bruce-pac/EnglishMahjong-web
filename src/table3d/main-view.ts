@@ -324,6 +324,11 @@ export class MainView {
     return this.renderer.info.render.calls;
   }
 
+  /** 渲染器支持的最大各向异性过滤。中央记分盘 45° 斜看，不开会糊（T2.2） */
+  get maxAnisotropy(): number {
+    return this.renderer.capabilities.getMaxAnisotropy();
+  }
+
   dispose(): void {
     this.composer.dispose();
     this.renderer.dispose();

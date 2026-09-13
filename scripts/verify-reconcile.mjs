@@ -25,6 +25,19 @@ const a = await import("../src/table3d/thing-assign.ts");
 const { suffixShiftError } = await import("../src/table3d/test-helpers.ts");
 // T5.1 推演不变式：fold(上一步 state, events) ≡ 这一步 state。判定与单测共用 replayDiff
 const { replayDiff } = await import("../src/table3d/replay.ts");
+// T2.2：envelope 没有庄家字段，盘上的 East 靠「庄家 = gameIndexOf % 4」推出来。
+// 开新局的 envelope 带从开局起的全部事件，第一个 draw 就是庄家摸的——拿它核对这条推论
+// 核对的是盘面实际用的 dealerOf，不是另写一遍公式——否则 dealerOf 被改坏了这里抓不到
+const { gameIndexOf } = await import("../src/table3d/table-view.ts");
+const { dealerOf } = await import("../src/table3d/board-model.ts");
+let dealerChecked = 0;
+function checkDealer(env, where) {
+  const first = env.events.find((e) => e.t === "draw");
+  if (!first) fail(`庄家推论：${where} 开局 envelope 里没有 draw 事件`);
+  const want = dealerOf(env);
+  if (first.seat !== want) fail(`庄家推论：${where} 第一个 draw 是座位 ${first.seat}，dealerOf = ${want}`);
+  dealerChecked++;
+}
 
 const DECK_SIZE = 108;
 let playerId = null;
@@ -121,6 +134,7 @@ for (let round = 0; games < GAMES; round++) {
     body: JSON.stringify(CONFIGS[round % CONFIGS.length]),
   });
   const matchId = env.matchId;
+  checkDealer(env, `场${round}第 1 局`);
 
   let r = m.rebuildLoose(env.state.me, 1);
   let lastSlotName = new Map();
@@ -174,6 +188,7 @@ for (let round = 0; games < GAMES; round++) {
       games++;
       if (env.matchFinished || games >= GAMES) break;
       env = await api(`/api/matches/${matchId}/games`, { method: "POST" });
+      checkDealer(env, `场${round}第 ${gameIndexOf(env) + 1} 局`);
       // 换局是 A 层最该被考验的时刻：整手牌全换，上一局的存档必须整体作废
       r = m.rebuildLoose(env.state.me, r.nextTileId);
       lastSlotName = new Map();
@@ -201,3 +216,4 @@ for (let round = 0; games < GAMES; round++) {
 
 console.log(`✓ ${games} 局 / ${steps} 步，五条不变式全部成立；推演不变式验了 ${replayed} 步`);
 console.log(`  推演过的事件：${JSON.stringify(eventKinds)}`);
+console.log(`  庄家推论（开局第一个 draw 的座位 = dealerOf）核对了 ${dealerChecked} 局`);
