@@ -49,10 +49,50 @@ export function matchWin(loose: LooseSlots, word: string, winTile: string): ChiM
 }
 
 /**
- * 吃牌、胡牌共用的对应规则（见文件头）。`discard` 是桌上那张（吃牌时别家打出的、胡牌时要胡的），
- * `useAll` 为真时要求用光全部散牌
+ * 提示词（T6.2）：没有桌上那张牌，只从散牌里挑，用来高亮提示词会用到哪几张。
+ * `wild` 是服务端说的「白搭代的字母」：真字母补不齐的那一位才用白搭，且那一位的字母必须正好是它。
+ * 要用到暗词里的牌时对应不上（`missing`），界面据此注明「要先拆开暗词」
  */
-function matchWord(loose: LooseSlots, word: string, discard: string, useAll: boolean): ChiMatch {
+export function matchHint(loose: LooseSlots, word: string, wild?: string): ChiMatch {
+  return matchWord(loose, word, null, false, wild ? wild.toLowerCase() : undefined);
+}
+
+/**
+ * 吃牌 / 胡牌提交什么、对账要移除哪几张（T6.1 / T6.2 / T6.3）。
+ *
+ * - 吃牌：`tiles` 是手里用到的牌 + 打出的那张；用掉的牌离开散牌区进亮词区，`consumedTileIds` 是对应出来的那几张
+ * - 胡牌：只报词（服务端要求恰好用光全部散牌 + 那张牌）；牌**不离开**手牌——服务端反而把胡的那张加进来
+ *   （engine.py commit_win 胡了才 hand.append），所以不移除任何牌
+ * - `viaHint`：提示模式下从候选列表里选的词（T6.2），服务端据此在正题集里记「被提示」
+ */
+export function claimSubmission(
+  kind: "chi" | "win",
+  m: Extract<ChiMatch, { ok: true }>,
+  word: string,
+  expansion?: string,
+  viaHint = false,
+): {
+  body: { kind: "chi" | "win"; tiles?: string; word: string; expansion?: string; viaHint?: boolean };
+  consumedTileIds: number[];
+} {
+  if (kind === "win") return { body: { kind: "win", word, expansion }, consumedTileIds: [] };
+  return {
+    body: { kind: "chi", tiles: m.tiles, word, expansion, ...(viaHint ? { viaHint: true } : {}) },
+    consumedTileIds: m.tileIds,
+  };
+}
+
+/**
+ * 吃牌、胡牌、提示共用的对应规则（见文件头）。`discard` 是桌上那张（吃牌时别家打出的、胡牌时要胡的），
+ * 提示没有这张，传 null。`useAll` 为真时要求用光全部散牌；`wildLetter` 给了的话，白搭只能代这个字母
+ */
+function matchWord(
+  loose: LooseSlots,
+  word: string,
+  discard: string | null,
+  useAll: boolean,
+  wildLetter?: string,
+): ChiMatch {
   const w = [...word.trim().toLowerCase()];
   if (w.length === 0 || w.some((c) => !/[a-z]/.test(c))) return { ok: false, reason: "empty" };
 
@@ -65,7 +105,7 @@ function matchWord(loose: LooseSlots, word: string, discard: string, useAll: boo
   const used = new Set<number>();
 
   // ① 打出的那张是字母：先认领一个同字母的位置
-  if (!isWild(discard)) {
+  if (discard !== null && !isWild(discard)) {
     const at = w.findIndex((c) => c === discard);
     if (at < 0) return { ok: false, reason: "discardUnused" };
     fill[at] = "discard";
@@ -84,12 +124,14 @@ function matchWord(loose: LooseSlots, word: string, discard: string, useAll: boo
   // ③ 剩下的位置交给白搭。打出的那张是白搭时，它最后认领一个种类对得上的位置
   const rest = w.map((_, i) => i).filter((i) => !fill[i]);
   let discardWildAt = -1;
-  if (isWild(discard)) {
+  if (discard !== null && isWild(discard)) {
     discardWildAt = rest.findIndex((i) => wildKindOf(w[i]) === discard);
     if (discardWildAt < 0) return { ok: false, reason: rest.length ? "missing" : "discardUnused" };
   }
   const handWildPositions = rest.filter((_, k) => k !== discardWildAt);
   for (const i of handWildPositions) {
+    // 提示：服务端说白搭代的是哪个字母，别的位置补不齐就是真缺
+    if (wildLetter !== undefined && w[i] !== wildLetter) return { ok: false, reason: "missing" };
     const kind = wildKindOf(w[i]);
     const candidates = [...pool].reverse().filter((x) => !used.has(x.e.tileId) && x.e.tile === kind);
     const hit = candidates.find((x) => x.e.wildLetter === w[i]) ?? candidates[0];
@@ -99,12 +141,12 @@ function matchWord(loose: LooseSlots, word: string, discard: string, useAll: boo
   }
   if (discardWildAt >= 0) fill[rest[discardWildAt]] = "discard";
 
-  const wilds = fill.filter((f) => f === "discard" ? isWild(discard) : f !== null && isWild(f.tile)).length;
+  const wilds = fill.filter((f) => (f === "discard" ? isWild(discard!) : f !== null && isWild(f.tile))).length;
   if (wilds > MAX_WILDS_PER_WORD) return { ok: false, reason: "tooManyWilds" };
 
   const hand = fill.filter((f): f is LooseEntry => f !== null && f !== "discard");
   // 胡牌要用光全部散牌：手里还剩一张没用上就不行（不说剩的是哪张）
   if (useAll && hand.length !== pool.length) return { ok: false, reason: "notAll" };
   const handTiles = hand.map((e) => e.tile).join("");
-  return { ok: true, handTiles, tiles: handTiles + discard, tileIds: hand.map((e) => e.tileId) };
+  return { ok: true, handTiles, tiles: handTiles + (discard ?? ""), tileIds: hand.map((e) => e.tileId) };
 }

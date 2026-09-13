@@ -2099,6 +2099,74 @@ button.footer-link {
   color: #ffff99;
 }
 
+/* T6.2 提示列表：自己回合的 [提示] 面板、提示模式的吃牌候选共用 */
+.table3d-hint-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.table3d-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border-radius: 8px;
+  background: rgba(10, 30, 20, 0.9);
+}
+.table3d-hint-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #e8f3ec;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.table3d-hint-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.table3d-hint-item.picked {
+  border-color: #ffd27a;
+  background: rgba(255, 210, 122, 0.12);
+}
+.table3d-hint-item .word {
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.table3d-hint-item .tag {
+  /* 背景、边框、内边距都写死：页面上还有一条全局的 .tag（2.5D 的标签样式），不写死会被它染成红底 */
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: #9fc3b0;
+  font-size: 12px;
+  font-weight: normal;
+}
+/* 注明：已组成暗词（中性的告知，灰绿色） */
+.table3d-hint-item .tag.info {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(159, 195, 176, 0.16);
+  color: #b7d3c3;
+}
+/* 注明：要先拆开暗词（需要玩家先做点什么，偏红） */
+.table3d-hint-item .tag.warn {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 143, 128, 0.16);
+  color: #ffb4a8;
+}
+
 /* T4.1 校验条。位置由外层 .table3d-actions 决定 */
 .table3d-check {
   max-width: 360px;

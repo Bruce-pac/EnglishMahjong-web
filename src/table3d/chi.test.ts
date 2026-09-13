@@ -3,7 +3,7 @@
 import { Group } from "three";
 import { describe, expect, it } from "vitest";
 import type { Envelope, State } from "../api";
-import { matchChi, matchWin } from "./chi";
+import { claimSubmission, matchChi, matchHint, matchWin } from "./chi";
 import { fakeAssetLoader } from "./fake-assets";
 import { LOOSE_SLOTS } from "./layout";
 import { declareWild, type LooseSlots } from "./loose-reconcile";
@@ -125,13 +125,13 @@ describe("吃牌高亮", () => {
     view.apply({ matchId: "m-hl", events: [], state: st, pending: null, result: null, matchFinished: false });
     const m = matchChi(view.looseSlots, "cat", "t");
     if (!m.ok) throw new Error("应该对应得上");
-    view.setChiHighlight(m.tileIds);
+    view.setHighlight(m.tileIds);
     expect(view.selectedTileIds()).toEqual([]);
     const lit = objectView.mainGroup.children.filter(
       (c) => c.type === "Mesh" && c.visible && (c as unknown as { material: { emissive?: { r: number } } }).material.emissive?.r! > 0.2,
     );
     expect(lit).toHaveLength(2);
-    view.setChiHighlight([]);
+    view.setHighlight([]);
     const still = objectView.mainGroup.children.filter((c) => c.type === "Mesh" && c.visible && c.name !== "dropShadow");
     expect(still.filter((c) => (c as unknown as { material: { emissive?: { r: number } } }).material.emissive?.r! > 0.2)).toHaveLength(0);
   });
@@ -169,6 +169,56 @@ describe("matchWin（胡牌：必须用光全部散牌）", () => {
 
   it("词比手里的牌还长 → missing", () => {
     expect(matchWin(row("a"), "cart", "t")).toEqual({ ok: false, reason: "missing" });
+  });
+});
+
+describe("matchHint（提示词：没有桌上那张，只从散牌里挑）", () => {
+  it("用 wild 指定的字母补白搭：COD（★=O）用到 C、白搭、D", () => {
+    const s = row("c1dx");
+    expect(matchHint(s, "cod", "o")).toEqual({ ok: true, handTiles: "c1d", tiles: "c1d", tileIds: [idAt(s, 0), idAt(s, 1), idAt(s, 2)] });
+  });
+
+  it("白搭只能代 wild 指定的那个字母：服务端说 ★=A，那 O 那一位就补不上", () => {
+    expect(matchHint(row("c1d"), "cod", "a")).toEqual({ ok: false, reason: "missing" });
+  });
+
+  it("真字母优先：散牌里有 O 就不用白搭；同字母挑最靠右", () => {
+    const s = row("oc1do");
+    expect(matchHint(s, "cod", "o")).toMatchObject({ ok: true, handTiles: "cod", tileIds: [idAt(s, 1), idAt(s, 4), idAt(s, 3)] });
+  });
+
+  it("要用到暗词里的牌 → 对应失败（界面注明要先拆开暗词）", () => {
+    const s = row("cat.x", [[0, 1, 2]]);
+    expect(matchHint(s, "cat")).toEqual({ ok: false, reason: "missing" });
+  });
+
+  it("没有 wild 的提示照常对应；白搭种类不对不用", () => {
+    expect(matchHint(row("cat"), "cat")).toMatchObject({ ok: true, handTiles: "cat" });
+    expect(matchHint(row("c2t"), "cat", "a")).toEqual({ ok: false, reason: "missing" });
+  });
+});
+
+describe("claimSubmission（提交什么、对账移除哪几张）", () => {
+  it("提示模式吃牌：带 viaHint: true，consumedTileIds 是对应出来的那几张（重复字母挑右边的）", () => {
+    const s = row("a.cax");
+    const m = matchChi(s, "cat", "t");
+    if (!m.ok) throw new Error("应该对应得上");
+    expect(claimSubmission("chi", m, "cat", undefined, true)).toEqual({
+      body: { kind: "chi", tiles: "cat", word: "cat", expansion: undefined, viaHint: true },
+      consumedTileIds: [idAt(s, 2), idAt(s, 3)],
+    });
+  });
+
+  it("非提示模式吃牌：不带 viaHint", () => {
+    const m = matchChi(row("ca"), "cat", "t");
+    if (!m.ok) throw new Error("应该对应得上");
+    expect(claimSubmission("chi", m, "cat").body).not.toHaveProperty("viaHint");
+  });
+
+  it("胡牌：只报词和全称，不移除任何牌", () => {
+    const m = matchWin(row("a"), "at", "t");
+    if (!m.ok) throw new Error("应该对应得上");
+    expect(claimSubmission("win", m, "at", "x")).toEqual({ body: { kind: "win", word: "at", expansion: "x" }, consumedTileIds: [] });
   });
 });
 

@@ -731,10 +731,11 @@ export class TableView {
   }
 
   /**
-   * 吃牌时高亮会用掉的那几张（T6.1）。集合没变就不重新提交。
+   * 高亮一组牌（按 tileId）：吃牌 / 胡牌时会用掉的那几张（T6.1），或点了提示词后它会用到的那几张（T6.2）。
+   * 只是高亮，不选中、不排牌。集合没变就不重新提交。
    * 离开散牌区的 tileId 自然就高亮不到了（refreshFlags 按当前 LooseSlots 查）
    */
-  setChiHighlight(tileIds: readonly number[]): void {
+  setHighlight(tileIds: readonly number[]): void {
     const next = new Set(tileIds);
     if (next.size === this.chiTiles.size && [...next].every((id) => this.chiTiles.has(id))) return;
     this.chiTiles = next;

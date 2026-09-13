@@ -6,7 +6,10 @@ import { AssetLoader } from "./asset-loader";
 import { WILD_CANDIDATES } from "./atlas";
 import { SelectionValidator, type CheckState } from "./check";
 import { ConfirmGate } from "./confirm";
-import { matchChi, matchWin, type ChiMatch } from "./chi";
+import { claimSubmission, matchChi, matchHint, matchWin, type ChiMatch } from "./chi";
+import { decisionKeyOf, HintPick } from "./hint-pick";
+import { HintList, HintPanel, type Hint, type HintNote } from "./HintPanel";
+import { groupKeyOf } from "./loose-reconcile";
 import { canDiscard, canPass, type DiscardIntent } from "./discard";
 import { WORLD_SIZE } from "./layout";
 import { MainView } from "./main-view";
@@ -41,6 +44,15 @@ const DEFAULT_CONFIG: MatchConfig = {
  */
 function claimKindOf(p: Pending | null): "chi" | "win" | null {
   return p?.kind === "chi" || p?.kind === "win" ? p.kind : null;
+}
+
+/**
+ * 新开的局用的配置。地址栏带 `?hints=1` 时打开提示（T6.2）——**只影响新开的局**：
+ * 已有的局以服务端的 `state.config.hints` 为准，刷新回来也一样
+ */
+function configForNewMatch(): MatchConfig {
+  const hints = new URLSearchParams(window.location.search).get("hints") === "1";
+  return { ...DEFAULT_CONFIG, hints };
 }
 
 /**
@@ -144,11 +156,30 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   const [chiCheck, setChiCheck] = useState<CheckState>({ status: "idle" });
   const [chiArmed, setChiArmed] = useState(false);
   const [chiExpansion, setChiExpansion] = useState("");
-  const chiRef = useRef<{ open: () => void; cancel: () => void; reveal: (expansion: string) => void } | null>(null);
+  const chiRef = useRef<{
+    open: () => void;
+    cancel: () => void;
+    reveal: (expansion: string) => void;
+    choose: (word: string) => void;
+  } | null>(null);
   // ---- T6.3 结算 / 下一局 ----
   /** 这一局结束了（`env.result` 非空）：显示结算面板。刷新回来时服务端照样给 result，面板照样出来 */
   const [settle, setSettle] = useState<{ result: Result; state: State; matchFinished: boolean } | null>(null);
   const nextRef = useRef<(() => void) | null>(null);
+  // ---- T6.2 提示 ----
+  /** 本场开没开提示：以服务端 `state.config.hints` 为准。为假时页面上不出现任何提示入口 */
+  const [hintsOn, setHintsOn] = useState(false);
+  /** 这一次决策服务端给的提示（提示关闭时恒为空） */
+  const [hintList, setHintList] = useState<Hint[]>([]);
+  const [hintOpen, setHintOpen] = useState(false);
+  /** 点过的那个提示词（viaHint 靠它判定） */
+  const [hintPicked, setHintPicked] = useState<string | null>(null);
+  /**
+   * 每条提示后面的注明（按单词）：已经是自己的暗词 →「已组成暗词」；要借用暗词里的牌 →「要先拆开暗词」。
+   * 只用散牌就对应得上的不在表里
+   */
+  const [hintNotes, setHintNotes] = useState<Record<string, HintNote>>({});
+  const hintRef = useRef<{ pick: (h: Hint) => void } | null>(null);
   const actionsRef = useRef<{
     group: (expansion: string) => void;
     reveal: (expansion: string) => void;
@@ -404,6 +435,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     let busy = false;
     /** 这一局结束了（结算页前的最终局面） */
     let finishedFlag = false;
+    // ---- T6.2 提示 ----
+    const hintPick = new HintPick();
+    let hintDecision = "";
+    /** 本场开没开提示（effect 里读；界面上用的是 hintsOn 状态） */
+    let hintsOnFlag = false;
     let noticeTimer = 0;
 
     const showNotice = (message: string, tone: "error" | "info" = "error") => {
@@ -441,6 +477,38 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         lastClaimSig = claimSig;
       }
       setWallLeft(env.state.wallLeft);
+      setHintsOn(env.state.config.hints);
+      hintsOnFlag = env.state.config.hints;
+      // 提示：决策换了（摸了新牌、轮到别家）就清掉点过的词、收起列表、取消高亮
+      const decision = decisionKeyOf(env);
+      if (decision !== hintDecision) {
+        hintDecision = decision;
+        hintPick.sync(decision);
+        setHintPicked(null);
+        setHintOpen(false);
+        if (claimKindOf(pending) === null) tableView?.setHighlight([]);
+      }
+      const hints = env.pending?.hints ?? [];
+      setHintList(hints);
+      // 散牌区变了（组了、拆了暗词）会影响每条提示的注明，每个 envelope 都重算。
+      // 服务端用整手牌算提示，暗词里的牌也算进去：玩家自己组好的 FIX 也会出现在列表里——
+      // 这时它不是「要先拆开暗词」（那等于让人把刚组好的词拆掉），而是「已组成暗词」
+      const notes: Record<string, HintNote> = {};
+      if (tableView) {
+        const loose = tableView.looseSlots;
+        const myGroups = new Set(loose.flatMap((e) => (e?.groupKey ? [e.groupKey] : [])));
+        for (const h of hints) {
+          const ok =
+            pending?.kind === "chi" && pending.tile
+              ? matchChi(loose, h.word, pending.tile).ok
+              : matchHint(loose, h.word, h.wild).ok;
+          if (ok) continue;
+          notes[h.word] = myGroups.has(groupKeyOf(h.tiles, h.word))
+            ? { text: "已组成暗词", tone: "info" } // 中性的告知：灰绿色
+            : { text: "要先拆开暗词", tone: "warn" };
+        }
+      }
+      setHintNotes(notes);
       setSettle(env.result ? { result: env.result, state: env.state, matchFinished: env.matchFinished } : null);
       refreshControls();
     };
@@ -547,7 +615,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       setChiFail(null);
       setChiArmed(false);
       setChiExpansion("");
-      tableView?.setChiHighlight([]);
+      tableView?.setHighlight([]);
     }
     /** mainLoop 每帧调：对应 → 高亮 → 校验。key 没变什么都不做 */
     const updateChi = () => {
@@ -567,7 +635,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       chiGate.sync(key); // 输入一变就退回第一步
       setChiArmed(false);
       setChiFail(chiMatch.ok || chiMatch.reason === "empty" ? null : chiMatch.reason);
-      tableView.setChiHighlight(chiMatch.ok ? chiMatch.tileIds : []);
+      tableView.setHighlight(chiMatch.ok ? chiMatch.tileIds : []);
       chiValidator.update(
         chiMatch.ok ? { kind: "word", tiles: chiMatch.handTiles, word: input.trim().toLowerCase() } : { kind: "none" },
       );
@@ -579,6 +647,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         setChiOpen(true);
       },
       cancel: () => closeChi(),
+      /** 提示模式：点了某个候选词，等同于把它填进输入框 */
+      choose: (word: string) => {
+        chiInputRef.current = word;
+        setChiInput(word);
+      },
       reveal: (exp) => {
         if (!chiMatch.ok || chiCurrent.status !== "done" || !chiCurrent.result.valid) return;
         const kind = claimKindOf(pending);
@@ -591,20 +664,20 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           return;
         }
         setChiArmed(false);
-        const { tiles, tileIds } = chiMatch;
-        const word = chiCurrent.word;
-        const expansion = exp || undefined;
-        // 吃牌：用掉的牌离开散牌区进亮词区，带上它们的 tileId 给对账消歧。
-        // 胡牌：牌**不离开**手牌——服务端反而把胡的那张加进手牌（engine.py commit_win 胡了才 hand.append）。
-        // 这时再把对应出来的牌当成「消耗掉的」交给对账，它们会被删掉又当新牌从右端加回来，
-        // 白搭声明丢失、牌的身份全换一遍。所以胡牌不传 consumedTileIds，对账只会在右端多出胡的那张
-        void submit(
-          (id) =>
-            kind === "win"
-              ? api.act(id, { kind: "win", word, expansion }) // 服务端要求：恰好用光全部散牌 + 那张牌
-              : api.act(id, { kind: "chi", tiles, word, expansion }),
-          kind === "win" ? [] : tileIds,
-        );
+        // 提交内容和对账要移除哪几张，由纯函数 claimSubmission 决定（单测钉着）：
+        // 吃牌移除对应出来的那几张；胡牌不移除（牌不离开手牌）；提示模式的吃牌带 viaHint
+        const sub = claimSubmission(kind, chiMatch, chiCurrent.word, exp || undefined, kind === "chi" && hintsOnFlag);
+        void submit((id) => api.act(id, sub.body), sub.consumedTileIds);
+      },
+    };
+
+    // 点了某个提示词：记下它（viaHint），高亮它会用到的散牌。只高亮，不替玩家排牌、不自动选中
+    hintRef.current = {
+      pick: (h) => {
+        hintPick.pick(h.word);
+        setHintPicked(hintPick.word);
+        const m = tableView ? matchHint(tableView.looseSlots, h.word, h.wild) : null;
+        tableView?.setHighlight(m?.ok ? m.tileIds : []);
       },
     };
 
@@ -633,7 +706,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         const ids = tableView!.selectedTileIds();
         const { tiles, word } = current;
         void submit(
-          (id) => api.group(id, tiles, word, false, exp || undefined),
+          // 只有提交的正是点过的那个提示词才算被提示（和 2.5D 一样）
+          (id) => api.group(id, tiles, word, hintPick.viaHint(word), exp || undefined),
           [],
           // 对账之前把暗词 key 写到选中的那几张上，配对才会认准它们
           // 然后收拢：成员向左连成一块（框选只能框连续一段，只会挪进成员之间的空格）
@@ -658,7 +732,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         setRevealArmed(false);
         const ids = tableView!.selectedTileIds();
         const { tiles, word } = current;
-        void submit((id) => api.act(id, { kind: "reveal", tiles, word, expansion: exp || undefined }), ids);
+        const viaHint = hintPick.viaHint(word) || undefined;
+        void submit((id) => api.act(id, { kind: "reveal", tiles, word, viaHint, expansion: exp || undefined }), ids);
       },
       cancel: () => {
         gate.reset();
@@ -767,7 +842,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       const loadMatch = async () => {
         setFailure(null);
         try {
-          const env = await openMatch(readMatchId(), DEFAULT_CONFIG, {
+          const env = await openMatch(readMatchId(), configForNewMatch(), {
             resume: api.resume,
             newMatch: api.newMatch,
             clearSave: persist.clear,
@@ -791,6 +866,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       actionsRef.current = null;
       chiRef.current = null;
       nextRef.current = null;
+      hintRef.current = null;
       chiValidator.dispose();
       ungroupActRef.current = null;
       wildActRef.current = null;
@@ -815,6 +891,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     };
   }, []);
 
+  /** 提示模式的吃牌（T6.2）：本场开了提示、是吃牌决策 → 出候选列表，不出输入框。胡牌服务端不给提示 */
+  const chiHintMode = hintsOn && !claimWin && hintList.length > 0;
   /** 吃牌打出的那张怎么显示（白搭画星） */
   const chiLabel = chiTile === "1" || chiTile === "2" ? "★" : chiTile.toUpperCase();
   /** 吃牌的 [亮词] 能不能点：对应上了、校验 ✓、能亮、缩写填了全称、没有请求在途 */
@@ -959,6 +1037,18 @@ export function Table3D({ onBack }: { onBack: () => void }) {
             )}
           </>
         )}
+        {/* T6.2 自己回合的提示：只在「要不要亮词」决策、且本场开了提示时出现 */}
+        {revealTurn && (
+          <HintPanel
+            enabled={hintsOn}
+            hints={hintList}
+            open={hintOpen}
+            onToggle={() => setHintOpen((o) => !o)}
+            picked={hintPicked}
+            note={(h) => hintNotes[h.word] ?? null}
+            onPick={(h) => hintRef.current?.pick(h)}
+          />
+        )}
         {/* T6.1 吃牌（输入框模式）。不读 pending.hints、不列候选：玩家自己想出词来 */}
         {chiTurn && !chiOpen && (
           <button className="table3d-act-btn" disabled={busyUi} onClick={() => chiRef.current?.open()}>
@@ -967,7 +1057,17 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         )}
         {chiTurn && chiOpen && (
           <div className="table3d-chi">
+            {chiHintMode && (
+              // 提示模式的吃牌：只展示服务端给的候选（pending.hints），前端不算任何候选
+              <HintList
+                hints={hintList}
+                picked={chiInput.trim().toLowerCase() || null}
+                note={(h) => hintNotes[h.word] ?? null}
+                onPick={(h) => chiRef.current?.choose(h.word)}
+              />
+            )}
             <div className="table3d-act-row">
+              {!chiHintMode && (
               <input
                 className="table3d-chi-input"
                 autoFocus
@@ -980,6 +1080,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
                 spellCheck={false}
                 autoComplete="off"
               />
+              )}
               <button
                 className={`table3d-act-btn${chiArmed ? " confirm" : ""}`}
                 disabled={!chiReady}
@@ -996,7 +1097,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
               </button>
             </div>
             <div className="table3d-chi-status">
-              {chiFail === "missing" && <span className="table3d-check-bad">手里凑不出这个词</span>}
+              {chiFail === "missing" && (
+                <span className="table3d-check-bad">
+                  {chiHintMode ? (hintNotes[chiInput.trim().toLowerCase()]?.text ?? "要先拆开暗词") : "手里凑不出这个词"}
+                </span>
+              )}
               {chiFail === "tooManyWilds" && <span className="table3d-check-bad">一个词最多只能用一张白搭</span>}
               {chiFail === "discardUnused" && (
                 <span className="table3d-check-bad">{claimWin ? "胡牌必须用上这张牌" : "吃牌必须用上打出的那张"}</span>
