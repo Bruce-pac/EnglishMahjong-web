@@ -21,6 +21,7 @@ import { Settlement } from "./Settlement";
 import { spellSelection } from "./spell";
 import { TableView } from "./table-view";
 import { Animation } from "./utils";
+import { winMarkers, type WinMarker } from "./win-marker";
 
 /**
  * 3D 页自己开局用的配置。
@@ -180,6 +181,12 @@ export function Table3D({ onBack }: { onBack: () => void }) {
    */
   const [hintNotes, setHintNotes] = useState<Record<string, HintNote>>({});
   const hintRef = useRef<{ pick: (h: Hint) => void } | null>(null);
+  // ---- T6.5 血战到底 ----
+  /** 自己胡了或已结算：散牌区锁住，操作区不出按钮 */
+  const [locked, setLocked] = useState(false);
+  /** 已胡各家的「第 N 胡」。文字由 React 渲染，位置每帧直接改 DOM（同 [拆开]） */
+  const [winMarks, setWinMarks] = useState<WinMarker[]>([]);
+  const markerEls = useRef(new Map<number, HTMLDivElement>());
   const actionsRef = useRef<{
     group: (expansion: string) => void;
     reveal: (expansion: string) => void;
@@ -440,6 +447,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     let hintDecision = "";
     /** 本场开没开提示（effect 里读；界面上用的是 hintsOn 状态） */
     let hintsOnFlag = false;
+    /** 「第 N 胡」标记（mainLoop 每帧按它投影） */
+    let marks: WinMarker[] = [];
     let noticeTimer = 0;
 
     const showNotice = (message: string, tone: "error" | "info" = "error") => {
@@ -468,6 +477,13 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       matchId = env.matchId;
       pending = env.pending;
       finishedFlag = env.matchFinished || env.result !== null;
+      // T6.5：自己胡了 / 结算中锁住散牌区。现在服务端会立刻返回结算，这是兜底；T5 加回放后才真正用上
+      const lock = env.state.me.won || env.result !== null;
+      tableView!.setLocked(lock);
+      if (lock) closeWildPicker();
+      setLocked(lock);
+      marks = winMarkers(env.state);
+      setWinMarks(marks);
       // 决策换了（吃成了、过了、别家先胡了、或者换成了别的牌），输入框和高亮一起收掉。
       // 只看「决策类型 + 那张牌」：决策期间组暗词、拆暗词也会来 envelope，散牌变了但输入不该丢，
       // 对应会随散牌区自动重算
@@ -814,6 +830,16 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         } else {
           ungroupEl.style.visibility = "hidden";
         }
+        // 「第 N 胡」跟着座位走：锚点是该家散牌区那一排的中点上方
+        for (const m of marks) {
+          const el = markerEls.current.get(m.seat);
+          if (!el) continue;
+          const p = mouseUi.project(tableView.looseRowAnchor(m.seat), view.camera);
+          const rect = view.canvas.getBoundingClientRect();
+          el.style.left = `${rect.left + ((p.x + 1) / 2) * rect.width}px`;
+          el.style.top = `${rect.top + ((1 - p.y) / 2) * rect.height}px`;
+          el.style.visibility = "visible";
+        }
       }
       view.render();
     };
@@ -931,6 +957,18 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           ))}
         </div>
       )}
+      {winMarks.map((m) => (
+        <div
+          key={m.seat}
+          className="table3d-win-mark"
+          ref={(el) => {
+            if (el) markerEls.current.set(m.seat, el);
+            else markerEls.current.delete(m.seat);
+          }}
+        >
+          {m.label}
+        </div>
+      ))}
       <button className="table3d-back" onClick={onBack}>
         ← 返回
       </button>
@@ -953,7 +991,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         </div>
       )}
       {/* T4.2 左下角统一操作区：校验条、组暗词 / 亮词 / 取消、「过」。不压自己手牌那一排 */}
-      <div className="table3d-actions">
+      {/* T6.5：自己胡了 / 结算中整个操作区不出（相机操作不受影响） */}
+      <div className="table3d-actions" hidden={locked}>
         {check.status !== "idle" && (
           // 教学红线：只回答「是不是词」，不列候选词、不列变位词，也不读 pending.hints
           <div className="table3d-check" role="status">

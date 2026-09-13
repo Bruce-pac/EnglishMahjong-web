@@ -1887,6 +1887,28 @@ button.footer-link {
   color: #e8f3ec;
 }
 /* T4.3 单击暗词后组旁的 [拆开]。left/top 由 Table3D 每帧按投影位置写（锚点在组最右那张上方） */
+/* T6.5：锁住时操作区整个不出。display:flex 会盖过 hidden 属性，要显式写 */
+.table3d-actions[hidden] {
+  display: none;
+}
+
+/* T6.5：已胡各家座位旁的「第 N 胡」，每帧按投影定位 */
+.table3d-win-mark {
+  position: fixed;
+  visibility: hidden;
+  transform: translate(-50%, -100%);
+  padding: 2px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 10px;
+  border: 1px solid #f5c542;
+  background: rgba(60, 40, 0, 0.88);
+  color: #ffe08a;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 6;
+}
+
 .table3d-ungroup {
   position: fixed;
   visibility: hidden;

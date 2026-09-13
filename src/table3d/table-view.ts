@@ -25,7 +25,7 @@
 
 import { Vector3 } from "three";
 import type { Envelope } from "../api";
-import { TILE_COUNT } from "./layout";
+import { TILE_COUNT, WORLD_SIZE } from "./layout";
 import {
   compactGroup,
   declareWild,
@@ -154,6 +154,11 @@ export class TableView {
   private overRiver = false;
   /** 现在能不能打牌。由调用方按 `pending` 设（`canDiscard`），这里不判规则 */
   private discardAllowed = false;
+  /**
+   * 散牌区锁住了（T6.5）：自己胡了、或已结算。拾取候选直接清空——悬停、拖动、框选、
+   * 右键打牌、双击白搭全部从拾取出发，所以一处清空就全堵上，不必在每个事件回调里判断
+   */
+  private locked = false;
 
   constructor(objectView: ObjectView, slots: Map<string, Slot> = makeSlots()) {
     this.objectView = objectView;
@@ -375,6 +380,41 @@ export class TableView {
     return [...this.slots.values()].filter((s) => s.group === "discard" && s.seat === this.mySeat);
   }
 
+  /**
+   * 锁住 / 解开自己的散牌区（T6.5）。锁住时手上的牌放回原位，悬停、选中、聚焦的暗词全部清掉；
+   * 相机不归这里管，照常可用
+   */
+  setLocked(locked: boolean): void {
+    if (locked === this.locked) return;
+    if (locked) {
+      this.cancelDrag();
+      this.focusedKey = null;
+      this.setSelected([]);
+      this.setHovered(null);
+    }
+    this.locked = locked;
+  }
+
+  get isLocked(): boolean {
+    return this.locked;
+  }
+
+  /**
+   * 某家散牌区那一排的中点上方（`mainGroup` 局部坐标），「第 N 胡」标记的锚点。
+   * 调用方每帧用 `mouseUi.project` 投到屏幕，镜头动了跟着走
+   */
+  looseRowAnchor(seat: number): Vector3 {
+    const row = [...this.slots.values()].filter((s) => s.group === "loose" && s.seat === seat);
+    const anchor = new Vector3();
+    for (const s of row) anchor.add(s.place(0).position);
+    anchor.divideScalar(Math.max(1, row.length));
+    anchor.z += Size[ThingType.TILE].y; // 立着的牌也高出一截
+    // 左右两家的「上方」在屏幕上正好压着牌，往桌沿外挪一个牌高。上下两家本来就在牌排上方，不动
+    const dx = anchor.x - WORLD_SIZE / 2;
+    if (Math.abs(dx) > Math.abs(anchor.y - WORLD_SIZE / 2)) anchor.x += Math.sign(dx) * Size[ThingType.TILE].y;
+    return anchor;
+  }
+
   /** 现在能不能打牌（T3.4）。不能时拖到牌河就是非法落点，牌回原位 */
   setDiscardAllowed(allowed: boolean): void {
     this.discardAllowed = allowed;
@@ -399,7 +439,7 @@ export class TableView {
    * 不是白搭、不在散牌区、或是暗词里的白搭（它的字母由暗词的 word 决定）都返回 null
    */
   wildPickerAt(thingIndex: number): { tileId: number; kind: "1" | "2"; anchor: Vector3 } | null {
-    const e = this.entryOf(thingIndex);
+    const e = this.locked ? null : this.entryOf(thingIndex);
     if (!e || (e.tile !== "1" && e.tile !== "2") || e.groupId !== undefined) return null;
     return { tileId: e.tileId, kind: e.tile, anchor: this.anchorAbove(thingIndex) };
   }
@@ -425,6 +465,7 @@ export class TableView {
    * 暗词里的白搭、普通字母牌、不在散牌区的牌、字母不在本类候选里，一律返回 false、什么都不改
    */
   declareWildTile(tileId: number, letter: string): boolean {
+    if (this.locked) return false;
     const e = this.loose.find((x) => x?.tileId === tileId);
     if (!e || (e.tile !== "1" && e.tile !== "2") || e.groupId !== undefined) return false;
     const lc = letter.toLowerCase();
@@ -442,7 +483,7 @@ export class TableView {
 
   /** 右键打牌：这张牌（Thing 编号）的打牌意图。不在自己散牌区、或是暗词里的牌，返回 null */
   discardIntentOf(thingIndex: number): DiscardIntent | null {
-    if (this.inGroup(thingIndex)) return null;
+    if (this.locked || this.inGroup(thingIndex)) return null;
     const tileId = this.tileIdOf(thingIndex);
     if (tileId === null) return null;
     const entry = this.loose.find((e) => e?.tileId === tileId)!;
@@ -466,7 +507,7 @@ export class TableView {
 
   /** 在悬停的牌上按下 → 拿起。没指着牌返回 false */
   dragStart(mouse3: Vector3): boolean {
-    if (this.held || this.hovered === null) return false;
+    if (this.locked || this.held || this.hovered === null) return false;
     // 拖一张牌时先清空选中（整组拖动是 T4.3）
     this.clearSelection();
     this.held = this.things[this.hovered]!;
@@ -695,7 +736,7 @@ export class TableView {
 
   /** 这一帧可拾取的牌（自己散牌区，含暗词）。`MouseUi` 每帧把它写进代理体 */
   get pickables(): readonly PickTarget[] {
-    return this.pickTargets;
+    return this.locked ? [] : this.pickTargets;
   }
 
   /**
@@ -711,7 +752,7 @@ export class TableView {
   setHovered(index: number | null): boolean {
     // 拖动中不拾取（Autotable 的 toSelect 在拿着牌时返回空）
     if (this.held && index !== null) return false;
-    const next = index !== null && this.pickTargets.some((t) => t.id === index) ? index : null;
+    const next = index !== null && this.pickables.some((t) => t.id === index) ? index : null;
     if (next === this.hovered) return false;
     this.hovered = next;
     this.refreshFlags();
@@ -766,7 +807,7 @@ export class TableView {
   setSelected(thingIds: readonly number[]): boolean {
     const next = new Set<number>();
     for (const i of thingIds) {
-      if (!this.pickTargets.some((t) => t.id === i)) continue;
+      if (!this.pickables.some((t) => t.id === i)) continue;
       // 暗词里的牌不单独参与操作：框选框进来也不算选中（见 inGroup）
       if (this.inGroup(i)) continue;
       const tileId = this.tileIdOf(i);
@@ -810,7 +851,7 @@ export class TableView {
    * 暗词本身的框一直在，不需要再描金边。点的不是暗词里的牌返回 false，什么都不改
    */
   focusGroupAt(thingIndex: number): boolean {
-    const key = this.entryOf(thingIndex)?.groupKey;
+    const key = this.locked ? undefined : this.entryOf(thingIndex)?.groupKey;
     if (!key || this.entryOf(thingIndex)?.groupId === undefined) return false;
     this.setSelected([]);
     this.focusedKey = key;

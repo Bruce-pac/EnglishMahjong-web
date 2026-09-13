@@ -184,9 +184,20 @@ export function layout(state: State, loose: LooseSlots, display: DisplayState): 
     // 恰好铺满整手；荒牌时 `greedy_words` 拼不出词就 return，剩下的散牌被丢掉，
     // 真人更极端（没组过词的直接是空数组）。所以剩下的 `handCount − 已覆盖张数`
     // 仍然是背面——写成「整手切换」的话，荒牌时别家那些拼不成词的散牌会凭空消失。
+    //
+    // T6.5：摊开的词与词之间空一格（CAT、DOG 首尾相连就读成 CATDOG），荒牌时剩下的背面牌
+    // 接在最后一个词后面、也空一格。空格只挪位置，**张数不变**：总张数仍是 handCount
+    const words = other.concealed.map((w) => orderByWord(w.tiles, w.word));
+    const covered = words.reduce((n, w) => n + w.length, 0);
+    const backs = Math.max(0, other.handCount - covered);
+    const gaps = words.length === 0 ? 0 : words.length - 1 + (backs > 0 ? 1 : 0);
+    // 连空格一起放不下 18 格就退回不留空，保证摆得下
+    const gap = covered + backs + gaps <= LOOSE_SLOTS ? 1 : 0;
     let i = 0;
-    for (const word of other.concealed) {
-      for (const cell of orderByWord(word.tiles, word.word)) {
+    let n = 0;
+    words.forEach((cells, w) => {
+      if (w > 0) i += gap;
+      for (const cell of cells) {
         if (i >= LOOSE_SLOTS) break;
         out.push({
           slotName: `loose.${i++}@${other.seat}`,
@@ -194,9 +205,11 @@ export function layout(state: State, loose: LooseSlots, display: DisplayState): 
           backVariant: 0,
           rotationIndex: LOOSE_FACE_UP,
         });
+        n++;
       }
-    }
-    for (; i < other.handCount && i < LOOSE_SLOTS; i++) {
+    });
+    if (words.length > 0 && backs > 0) i += gap;
+    for (; n < other.handCount && i < LOOSE_SLOTS; i++, n++) {
       out.push({
         slotName: `loose.${i}@${other.seat}`,
         typeIndex: UNKNOWN_FACE,
