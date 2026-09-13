@@ -61,6 +61,15 @@ export const SHIFT_TIME = 100;
  */
 export const TWEEN_TIME = 180;
 
+/** 拖动跨 `apply` 存活时要带过去的东西（T5.2）。牌按 tileId 记，锚点在最前 */
+interface DragCarry {
+  ids: number[];
+  /** 提交之前锚点那张牌的格子位置：提交后格子被挪了，按差值平移 heldMouse */
+  anchorPos: Vector3;
+  heldMouse: Vector3;
+  mouse: Vector3;
+}
+
 /** 一段全桌补间：从上一帧画的姿态（位置 + 朝向）过去。目标永远是 thing.place() */
 interface Tween {
   from: Place;
@@ -174,6 +183,11 @@ export class TableView {
    * 右键打牌、双击白搭全部从拾取出发，所以一处清空就全堵上，不必在每个事件回调里判断
    */
   private locked = false;
+  /**
+   * 提交锁（T5.2）：回放期间只锁**提交类**操作——打牌意图（右键 / 拖到牌河）拿不到，拖到牌河当非法落点。
+   * 拖动重排、整组拖暗词、框选、白搭赋值这些本地操作照常。和 `locked`（自己胡了 / 结算中，整排锁死）不是一回事
+   */
+  private submitLocked = false;
 
   constructor(objectView: ObjectView, slots: Map<string, Slot> = makeSlots()) {
     this.objectView = objectView;
@@ -219,8 +233,27 @@ export class TableView {
    * 换了槽位（或翻了面）的牌从上一帧画的位置补间过去（T5.1），不再瞬移
    */
   apply(env: Envelope, consumedTileIds: readonly number[] = [], pinned?: ReadonlyMap<string, string>): void {
-    // 拖到一半局面变了（将来轮到 AI 出牌时会这样）：先把手上的牌放回原位
-    this.cancelDrag();
+    // T5.2：拖到一半局面变了（回放的每一步都会走到这里）不再一律放下。
+    // 手上的牌按 **tileId** 记下——C 层提交后同字母的两张可能对调实例，按 Thing 找不回来；
+    // 提交完再按 tileId 找回、用最后一次的鼠标位置接着拖。
+    // 换了一场 / 一局，或手上的牌正是这次被拿走的（consumedTileIds），才照旧放回原位
+    let carry: DragCarry | null = null;
+    if (this.held) {
+      const ids = this.heldTileIds();
+      const sameGame = this.matchId === env.matchId && gameIndexOf(env) === this.gameIndex;
+      if (!sameGame || ids.some((id) => consumedTileIds.includes(id))) {
+        this.cancelDrag();
+      } else {
+        carry = {
+          ids,
+          anchorPos: this.held.place().position.clone(),
+          heldMouse: this.heldMouse!.clone(),
+          mouse: this.mouse!.clone(),
+        };
+        // 提交期间手上不拿着任何 Thing：commit 里顺带的 update() 不会把旧实例当成拿着的牌画
+        this.endDrag();
+      }
+    }
     this.lastEnv = env;
     this.mySeat = env.state.me.seat;
     // ---- A 层：散牌区身份对账 ----
@@ -259,6 +292,7 @@ export class TableView {
     this.loose = r.slots;
     this.nextTileId = r.nextTileId;
     this.saveAndCommit(pinned, true);
+    if (carry) this.resumeDrag(carry);
   }
 
   /** 存档 + B 层摊开 + 提交。envelope 进来和本地拖放落下都走这里 */
@@ -455,6 +489,20 @@ export class TableView {
     this.discardAllowed = allowed;
   }
 
+  /** 回放期间锁住提交、放开本地操作（T5.2）。回放结束按真 envelope 刷新控件时解开 */
+  setSubmitLocked(locked: boolean): void {
+    this.submitLocked = locked;
+  }
+
+  get isSubmitLocked(): boolean {
+    return this.submitLocked;
+  }
+
+  /** 拖到牌河现在算不算打牌：能打（pending）且没被回放锁住 */
+  private get riverOpen(): boolean {
+    return this.discardAllowed && !this.submitLocked;
+  }
+
   /**
    * 这张牌（Thing 编号）是不是暗词里的牌。
    *
@@ -518,7 +566,7 @@ export class TableView {
 
   /** 右键打牌：这张牌（Thing 编号）的打牌意图。不在自己散牌区、或是暗词里的牌，返回 null */
   discardIntentOf(thingIndex: number): DiscardIntent | null {
-    if (this.locked || this.inGroup(thingIndex)) return null;
+    if (this.locked || this.submitLocked || this.inGroup(thingIndex)) return null;
     const tileId = this.tileIdOf(thingIndex);
     if (tileId === null) return null;
     const entry = this.loose.find((e) => e?.tileId === tileId)!;
@@ -638,7 +686,7 @@ export class TableView {
     if (this.overRiver) {
       // 整组拖到牌河不算打牌（一次只能打一张），整组滑回
       const single = this.heldGroup.length === 1;
-      const intent = single && this.discardAllowed ? this.discardIntentOf(held.index) : null;
+      const intent = single && this.riverOpen ? this.discardIntentOf(held.index) : null;
       this.cancelDrag();
       return intent;
     }
@@ -673,6 +721,49 @@ export class TableView {
       this.slideTo(thing, thing.place().position, now);
     });
     return null;
+  }
+
+  /** 手上拿着的牌的 tileId，锚点（按下的那张）在最前。没在拖返回空数组 */
+  private heldTileIds(): number[] {
+    if (!this.held) return [];
+    const order = [this.held, ...this.heldGroup.filter((t) => t !== this.held)];
+    return order.flatMap((t) => {
+      const id = this.entryOf(t.index)?.tileId;
+      return id === undefined ? [] : [id];
+    });
+  }
+
+  /** 拿着的那张（锚点）的 tileId。测试、回放层用 */
+  get heldTileId(): number | null {
+    return this.heldTileIds()[0] ?? null;
+  }
+
+  /**
+   * `apply` 之后接着拖（T5.2）：按 tileId 找回拿着的牌当前的 Thing。
+   * 找不全（牌离开了散牌区）就放下；找到了而锚点的格子被挪了（右端挤空隙），
+   * 把「按下时的鼠标位置」跟着平移同样的距离——牌还捏在手指下，不会跳一下
+   */
+  private resumeDrag(c: DragCarry): void {
+    const thingOf = (id: number): Thing | null => {
+      const i = this.loose.findIndex((e) => e?.tileId === id);
+      return i < 0 ? null : (this.slots.get(`loose.${i}@${this.mySeat}`)?.thing ?? null);
+    };
+    const things = c.ids.map(thingOf);
+    if (things.some((t) => t === null)) {
+      const now = performance.now();
+      for (const t of this.looseThings()) this.slideTo(t, t.place().position, now);
+      return;
+    }
+    const group = things as Thing[];
+    this.held = group[0];
+    this.heldGroup = [...group].sort((a, b) => a.slot.indexes[0] - b.slot.indexes[0]);
+    for (const t of group) this.tweens.delete(t.index); // 拿着的牌跟手走，不跟补间走
+    const delta = this.held.place().position.clone().sub(c.anchorPos);
+    this.heldMouse = c.heldMouse.clone().add(new Vector3(delta.x, delta.y, 0));
+    this.mouse = c.mouse.clone();
+    this.movement = null;
+    this.setHovered(null);
+    this.drag();
   }
 
   /** 放弃这次拖动：世界状态本来就没动过，只要把画面滑回原位 */
@@ -762,7 +853,7 @@ export class TableView {
         temporary:
           held &&
           this.movement === null &&
-          !(this.overRiver && this.discardAllowed && this.heldGroup.length === 1),
+          !(this.overRiver && this.riverOpen && this.heldGroup.length === 1),
         bottom: false,
         // 滑动过程中暗词框也得在，不然一拖就闪一下
         grouped: this.entryOf(thing.index)?.groupId !== undefined,

@@ -185,6 +185,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   // ---- T6.5 血战到底 ----
   /** 自己胡了或已结算：散牌区锁住，操作区不出按钮 */
   const [locked, setLocked] = useState(false);
+  /** 正在回放别家的动作（T5.2）：本地操作照常，提交按钮灰掉、旁边注明「等别家出完」 */
+  const [replayingUi, setReplayingUi] = useState(false);
   /** 已胡各家的「第 N 胡」。文字由 React 渲染，位置每帧直接改 DOM（同 [拆开]） */
   const [winMarks, setWinMarks] = useState<WinMarker[]>([]);
   const markerEls = useRef(new Map<number, HTMLDivElement>());
@@ -349,6 +351,10 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         showNotice("暗词里的牌不能单独打，先拆开");
         return;
       }
+      if (tableView.isSubmitLocked) {
+        showNotice("等别家出完再出牌", "info");
+        return;
+      }
       const intent = tableView.discardIntentOf(hovered);
       if (intent) submitDiscard(intent);
     };
@@ -484,6 +490,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     /** 正在回放。回放期间又来了 envelope：先快进到底再处理 */
     let replaying: Promise<void> | null = null;
     let fastForward = false;
+    /** 回放进行中（右键打牌时给句提示用；界面上用的是 replayingUi） */
+    let replayingFlag = false;
     // 气泡：同一家新气泡顶掉旧的；停 SAY_MS 后淡出 0.3s 再撤掉（同 Mahjong 项目的 say-ui）
     const bubbleTimers = new Map<number, number>();
     let bubbleKey = 0;
@@ -527,9 +535,11 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         replaying = new Promise<void>((f) => (done = f));
         fastForward = false;
         pending = null;
-        tableView!.setLocked(true);
-        setLocked(true);
-        closeWildPicker();
+        // T5.2：回放期间只锁提交（busy 本来就为真，服务端请求一个都发不出去；拖到牌河当非法落点），
+        // 拖动重排、框选、白搭赋值、点提示照常。setLocked 只留给「自己胡了 / 结算中」
+        tableView!.setSubmitLocked(true);
+        replayingFlag = true;
+        setReplayingUi(true);
         refreshControls();
         let s = shownState;
         try {
@@ -559,6 +569,12 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         if (!alive) return;
       }
       tableView!.apply(env, consumed);
+      // 最后一步已经对齐真值，解开提交锁；控件随后由 applyEnvelope 按真 envelope 刷新
+      tableView!.setSubmitLocked(false);
+      if (replayingFlag) {
+        replayingFlag = false;
+        setReplayingUi(false);
+      }
       shownState = env.state;
       shownGame = game;
     };
@@ -655,6 +671,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     /** 拖到牌河、右键，都走这里。带上 tileId 给对账消歧（重复字母时空出的是打出去的那格） */
     const submitDiscard = (intent: DiscardIntent) => {
       if (!canDiscard(pending, busy)) return;
+      if (replayingFlag) return; // 兜底：回放期间 busy 为真、上一行已经挡住，不发请求
       void act({ kind: "discard", tile: intent.tile }, [intent.tileId]);
     };
 
@@ -1053,7 +1070,13 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         <div className="table3d-canvas" ref={mountRef} />
       </div>
       <div className="table3d-selection" ref={selectionRef} />
-      <button className="table3d-ungroup" ref={ungroupBtnRef} onClick={() => ungroupActRef.current?.()}>
+      <button
+        className="table3d-ungroup"
+        ref={ungroupBtnRef}
+        disabled={busyUi}
+        title={replayingUi ? "等别家出完" : undefined}
+        onClick={() => ungroupActRef.current?.()}
+      >
         拆开
       </button>
       {wildPicker && (
@@ -1196,6 +1219,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
               <button className="table3d-act-btn" onClick={() => actionsRef.current?.cancel()}>
                 取消
               </button>
+              {/* T5.2：回放期间校验照常出结果，只是提交按钮灰掉 */}
+              {replayingUi && <span className="table3d-act-note">等别家出完</span>}
             </div>
             {check.result.canReveal === false && (
               <span className="table3d-act-note">亮出的词至少 3 个字母</span>
