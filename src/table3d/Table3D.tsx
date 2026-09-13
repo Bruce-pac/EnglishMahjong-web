@@ -19,7 +19,8 @@ import { openMatch } from "./open-match";
 import * as persist from "./persist";
 import { Settlement } from "./Settlement";
 import { spellSelection } from "./spell";
-import { TableView } from "./table-view";
+import { gameIndexOf, TableView } from "./table-view";
+import { dwellOf, pinnedFor, SAY_MS, sayOf, stepState } from "./replay";
 import { Animation } from "./utils";
 import { winMarkers, type WinMarker } from "./win-marker";
 
@@ -187,6 +188,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   /** 已胡各家的「第 N 胡」。文字由 React 渲染，位置每帧直接改 DOM（同 [拆开]） */
   const [winMarks, setWinMarks] = useState<WinMarker[]>([]);
   const markerEls = useRef(new Map<number, HTMLDivElement>());
+  /** 回放时各家头上的气泡（「亮 WINDOW」「吃 Z」「胡」）。文字由 React 渲染，位置每帧直接改 DOM */
+  const [bubbles, setBubbles] = useState<Record<number, { text: string; out: boolean; key: number }>>({});
+  const bubbleEls = useRef(new Map<number, HTMLDivElement>());
   const actionsRef = useRef<{
     group: (expansion: string) => void;
     reveal: (expansion: string) => void;
@@ -308,6 +312,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         }
         return;
       }
+      // 锁住时（回放中 / 自己胡了 / 结算中）没有可拾取的牌，按下会落到这里——框选也不开始
+      if (tableView.isLocked) return;
       const p = mouseUi.raycastLevel(mouse2, view.camera, 0);
       if (!p) return;
       selectStart3 = p;
@@ -471,9 +477,96 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       setFinished(finishedFlag);
     };
 
-    /** 吃进 envelope。AI 的动作也在里面，现在直接跳到最终状态（动画是 T5.1） */
-    const applyEnvelope = (env: Envelope, consumedTileIds: readonly number[] = []) => {
-      tableView!.apply(env, consumedTileIds);
+    // ---- T5.1 事件回放 ----
+    /** 画面现在对应的 state，以及它属于哪一场的哪一局。回放从这里出发 */
+    let shownState: State | null = null;
+    let shownGame = "";
+    /** 正在回放。回放期间又来了 envelope：先快进到底再处理 */
+    let replaying: Promise<void> | null = null;
+    let fastForward = false;
+    // 气泡：同一家新气泡顶掉旧的；停 SAY_MS 后淡出 0.3s 再撤掉（同 Mahjong 项目的 say-ui）
+    const bubbleTimers = new Map<number, number>();
+    let bubbleKey = 0;
+    const say = (seat: number, text: string) => {
+      window.clearTimeout(bubbleTimers.get(seat));
+      const key = ++bubbleKey;
+      setBubbles((b) => ({ ...b, [seat]: { text, out: false, key } }));
+      bubbleTimers.set(
+        seat,
+        window.setTimeout(() => {
+          setBubbles((b) => ({ ...b, [seat]: { text, out: true, key } }));
+          bubbleTimers.set(
+            seat,
+            window.setTimeout(() => {
+              setBubbles((b) => {
+                const next = { ...b };
+                delete next[seat];
+                return next;
+              });
+            }, 300),
+          );
+        }, SAY_MS),
+      );
+    };
+
+    /**
+     * 把 envelope 画到桌上。带 events 的逐个事件回放：每步 `stepState` 推一格、
+     * 交给 tableView（pinned 指定背面牌从哪飞出来），间隔 REPLAY_STEP_MS；最后一步用真 envelope 对齐
+     * （它才带 pending、result、自己补摸的牌）。回放期间锁住散牌区，相机照常。
+     * 刷新、开新局、换局时 events 对不上画面（没有出发点），直接跳到最终状态
+     */
+    const replayEvents = async (env: Envelope, consumedTileIds: readonly number[]) => {
+      if (replaying) {
+        fastForward = true;
+        await replaying;
+      }
+      const game = `${env.matchId}|${gameIndexOf(env)}`;
+      let consumed = consumedTileIds;
+      if (shownState && shownGame === game && env.events.length > 0) {
+        let done = () => {};
+        replaying = new Promise<void>((f) => (done = f));
+        fastForward = false;
+        pending = null;
+        tableView!.setLocked(true);
+        setLocked(true);
+        closeWildPicker();
+        refreshControls();
+        let s = shownState;
+        try {
+          for (const e of env.events) {
+            if (fastForward || !alive) break;
+            // 自己发起的动作带的 tileId 交给处理自己那个事件的那一步：打牌 → discard，亮词 / 吃牌 → reveal
+            const own = e.seat === s.me.seat && consumed.length > 0 && (e.t === "discard" || e.t === "reveal");
+            const ids = own ? consumed : [];
+            const at = own && e.t === "discard" ? tableView!.looseSlots.findIndex((x) => x?.tileId === ids[0]) : -1;
+            const next = stepState(s, e);
+            tableView!.apply(
+              { ...env, state: next, pending: null, result: null },
+              ids,
+              pinnedFor(s, e, at >= 0 ? `loose.${at}@${s.me.seat}` : undefined),
+            );
+            if (own) consumed = [];
+            s = next;
+            const line = sayOf(e);
+            if (line && e.seat !== undefined) say(e.seat, line);
+            // 牌 180ms 飞到位，剩下的时间静止；吃、亮词、胡停得更久，气泡读得完
+            await new Promise((f) => setTimeout(f, dwellOf(e)));
+          }
+        } finally {
+          replaying = null;
+          done();
+        }
+        if (!alive) return;
+      }
+      tableView!.apply(env, consumed);
+      shownState = env.state;
+      shownGame = game;
+    };
+
+    /** 吃进 envelope。带 events 的先回放（T5.1），再按真 envelope 刷新界面 */
+    const applyEnvelope = async (env: Envelope, consumedTileIds: readonly number[] = []) => {
+      await replayEvents(env, consumedTileIds);
+      if (!alive) return;
       matchId = env.matchId;
       pending = env.pending;
       finishedFlag = env.matchFinished || env.result !== null;
@@ -545,7 +638,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         const env = await call(matchId);
         if (!alive) return false;
         beforeApply?.();
-        applyEnvelope(env, consumedTileIds);
+        // 回放期间 busy 一直是真的：提交锁到回放结束
+        await applyEnvelope(env, consumedTileIds);
         return true;
       } catch (e) {
         if (alive) showNotice(e instanceof ApiError ? e.message : describeFailure(e));
@@ -708,6 +802,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         [],
         () => {
           tableView?.resetGame();
+          shownState = null; // 新一局的 events 从空桌开始，不接上一局的画面
           closeChi();
           closeWildPicker();
         },
@@ -830,6 +925,23 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         } else {
           ungroupEl.style.visibility = "hidden";
         }
+        // 回放气泡跟着座位走，锚点同「第 N 胡」。优先放在锚点上方（让开「第 N 胡」）；
+        // 对家那排贴着画面上沿，上方放不下就翻到牌排下方。左右夹在窗口里——右家亮个长词不能出屏
+        for (const [seat, el] of bubbleEls.current) {
+          const p = mouseUi.project(tableView.looseRowAnchor(seat), view.camera);
+          const rect = view.canvas.getBoundingClientRect();
+          const ax = rect.left + ((p.x + 1) / 2) * rect.width;
+          const ay = rect.top + ((1 - p.y) / 2) * rect.height;
+          const w = el.offsetWidth;
+          const h = el.offsetHeight;
+          const margin = 8;
+          const above = ay - 34 - h / 2;
+          const cy = above - h / 2 >= margin ? above : ay + 64 + h / 2;
+          const cx = Math.min(Math.max(ax, w / 2 + margin), window.innerWidth - w / 2 - margin);
+          el.style.left = `${cx}px`;
+          el.style.top = `${cy}px`;
+          el.style.visibility = "visible";
+        }
         // 「第 N 胡」跟着座位走：锚点是该家散牌区那一排的中点上方
         for (const m of marks) {
           const el = markerEls.current.get(m.seat);
@@ -875,7 +987,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           });
           if (!alive) return;
           writeMatchId(env.matchId);
-          applyEnvelope(env);
+          await applyEnvelope(env);
         } catch (e) {
           if (alive) setFailure({ message: describeFailure(e), retry: () => void loadMatch() });
         }
@@ -898,6 +1010,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       wildActRef.current = null;
       validator.dispose();
       window.clearTimeout(noticeTimer);
+      for (const t of bubbleTimers.values()) window.clearTimeout(t);
       cancelAnimationFrame(raf);
       mount.removeEventListener("mousemove", onMouseMove);
       mount.removeEventListener("mouseleave", onMouseLeave);
@@ -967,6 +1080,19 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           }}
         >
           {m.label}
+        </div>
+      ))}
+      {Object.entries(bubbles).map(([seat, b]) => (
+        <div
+          key={`${seat}-${b.key}`}
+          className={`table3d-say${b.out ? " out" : ""}`}
+          role="status"
+          ref={(el) => {
+            if (el) bubbleEls.current.set(Number(seat), el);
+            else bubbleEls.current.delete(Number(seat));
+          }}
+        >
+          {b.text}
         </div>
       ))}
       <button className="table3d-back" onClick={onBack}>

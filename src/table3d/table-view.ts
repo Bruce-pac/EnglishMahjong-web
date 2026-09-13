@@ -49,12 +49,23 @@ import * as persist from "./persist";
 import { makeSlots } from "./setup-slots";
 import type { Slot } from "./slot";
 import { Thing } from "./thing";
-import { Size, ThingType } from "./types";
+import { Size, ThingType, type Place } from "./types";
 import { rectangleOverlap } from "./utils";
 import { WILD_CANDIDATES } from "./atlas";
 
 /** 被挤开 / 落下的牌滑过去用多久（Autotable 的 SHIFT_TIME）。完整动画层是 T5.1 */
 export const SHIFT_TIME = 100;
+/**
+ * 回放时换了槽位的牌补间多久（T5.1）。参照 Mahjong 项目的 ANIM_TIME=180：
+ * 必须**显著短于**回放步长（600ms），牌落定后要静止一会儿，不然桌上一直在动、看不清
+ */
+export const TWEEN_TIME = 180;
+
+/** 一段全桌补间：从上一帧画的姿态（位置 + 朝向）过去。目标永远是 thing.place() */
+interface Tween {
+  from: Place;
+  start: number;
+}
 
 /** 一段滑动：从哪到哪、什么时候开始 */
 interface Slide {
@@ -148,6 +159,10 @@ export class TableView {
   private movement: Movement | null = null;
   /** 正在滑动的牌，按 Thing 编号 */
   private slides = new Map<number, Slide>();
+  /** 全桌补间（T5.1），按 Thing 编号。优先于 slides */
+  private tweens = new Map<number, Tween>();
+  /** 每个 Thing 最后一次画出来的姿态。藏起来了也留着——再出现时从这里飞过去 */
+  private shown = new Map<number, Place>();
   /** 每张牌上一帧**画在哪**。起一段新滑动时从这里出发，不会跳 */
   private drawn = new Map<number, Vector3>();
   /** 拿着的牌现在压在自己牌河上方（T3.4） */
@@ -199,8 +214,11 @@ export class TableView {
    * @param consumedTileIds 前端自己发起的操作（打牌、组暗词、亮词）知道消耗掉的是
    *   哪几张牌，填进来消除重复字母的歧义（T1.4 方案 §2 规则 3）。T2.1 只读，
    *   永远是空的；T4.x 起才有内容。
+   * @param pinned 目标槽位 → 来源槽位（T5.1 回放层按事件给，见 `replay.ts` 的 `pinnedFor`）
+   *
+   * 换了槽位（或翻了面）的牌从上一帧画的位置补间过去（T5.1），不再瞬移
    */
-  apply(env: Envelope, consumedTileIds: readonly number[] = []): void {
+  apply(env: Envelope, consumedTileIds: readonly number[] = [], pinned?: ReadonlyMap<string, string>): void {
     // 拖到一半局面变了（将来轮到 AI 出牌时会这样）：先把手上的牌放回原位
     this.cancelDrag();
     this.lastEnv = env;
@@ -225,6 +243,8 @@ export class TableView {
       }
       // 换局 = 桌上的牌全部换了一批，上一局的实例身份没有任何参考价值
       this.lastSlotName.clear();
+      this.shown.clear();
+      this.tweens.clear();
       this.gameIndex = gameIndexOf(env);
     } else if (gameIndexOf(env) !== this.gameIndex) {
       // 同一场换了一局，matchId 不变：兜底判定换局（[下一局] 之外，别的标签页开了下一局也会走到这里）
@@ -238,11 +258,11 @@ export class TableView {
         : reconcileLoose(env.state.me, this.loose, this.nextTileId, consumedTileIds);
     this.loose = r.slots;
     this.nextTileId = r.nextTileId;
-    this.saveAndCommit();
+    this.saveAndCommit(pinned, true);
   }
 
   /** 存档 + B 层摊开 + 提交。envelope 进来和本地拖放落下都走这里 */
-  private saveAndCommit(): void {
+  private saveAndCommit(pinned?: ReadonlyMap<string, string>, animate = false): void {
     const env = this.lastEnv!;
     // 结算了就把存档清掉（方案 §6 的第一条时机），否则留着下一局误读
     if (env.matchFinished || env.result !== null) {
@@ -257,7 +277,7 @@ export class TableView {
     }
 
     // ---- B 层：摊开局面 ----
-    this.commit(layout(env.state, this.loose, this.display));
+    this.commit(layout(env.state, this.loose, this.display), pinned, animate);
   }
 
   /**
@@ -267,7 +287,8 @@ export class TableView {
    * 2. 提交牌面（快路径 `updateThingTypes`）
    * 3. 摆位置、交给 ObjectView
    */
-  private commit(all: Placement[]): void {
+  private commit(all: Placement[], pinned?: ReadonlyMap<string, string>, animate = false): void {
+    const now = performance.now();
     // Thing 池是**零余量的 108**（T1.4 方案 §4.2）：全副牌在任何时刻都分布在
     // 散牌区、亮词区、牌河、牌墙里，正好用满。真实牌局不可能超，但
     // `/api/dev` 后门能摆出超编的局面——`dev.py` 的 nextDraw 是
@@ -287,6 +308,7 @@ export class TableView {
       this.lastSlotName,
       (i) => this.committed[i],
       ALL_THINGS,
+      pinned,
     );
 
     // ① 牌面。没被摆上桌的实例沿用旧值——它反正是隐藏的，但**不能乱改**：
@@ -333,6 +355,13 @@ export class TableView {
       placed.add(index);
       nextSlotName.set(index, p.slotName);
       const place = thing.place();
+      // T5.1：换了槽位或翻了面，就从上一帧画的姿态补间过去。背面牌落进牌河、亮词区时顺带翻成正面
+      const from = this.shown.get(index);
+      if (animate && from && (!from.position.equals(place.position) || !from.rotation.equals(place.rotation))) {
+        this.tweens.set(index, { from: { ...from, position: from.position.clone(), rotation: from.rotation.clone() }, start: now });
+        this.slides.delete(index);
+      }
+      if (!this.tweens.has(index)) this.shown.set(index, place);
       if (slot.group === "loose" && slot.seat === this.mySeat) pickTargets.push({ id: index, place });
       renders.push({
         thingIndex: index,
@@ -358,7 +387,13 @@ export class TableView {
 
     this.objectView.updateThings(renders);
     // 剩下的实例这一帧没牌可演，藏起来——不藏的话它们会顶着单位矩阵堆在原点
-    for (const index of ALL_THINGS) if (!placed.has(index)) this.objectView.hideThing(index);
+    for (const index of ALL_THINGS) {
+      if (placed.has(index)) continue;
+      this.objectView.hideThing(index);
+      this.tweens.delete(index);
+    }
+    // 补间中的牌这一帧就画在起点，不先在终点闪一下
+    if (this.tweens.size > 0) this.update(now);
 
     this.lastSlotName = nextSlotName;
   }
@@ -690,32 +725,36 @@ export class TableView {
    * 而且只提交自己散牌区那 ≤18 张——其余的实例矩阵原封不动。
    */
   update(now: number): void {
-    if (!this.held && this.slides.size === 0) return;
+    if (!this.held && this.slides.size === 0 && this.tweens.size === 0) return;
 
     const renders: Render[] = [];
-    for (const thing of this.looseThings()) {
+    const loose = this.looseThings();
+    for (const thing of loose) {
       const place = thing.place();
-      let position = place.position;
+      let pose: Place = place;
       const held = this.heldGroup.includes(thing);
 
       if (held) {
-        position = place.position.clone();
+        const position = place.position.clone();
         position.x += this.mouse!.x - this.heldMouse!.x;
         position.y += this.mouse!.y - this.heldMouse!.y;
+        pose = { ...place, position };
+      } else if (this.tweens.has(thing.index)) {
+        pose = this.tweenPose(thing, now);
       } else {
         const slide = this.slides.get(thing.index);
         if (slide) {
           const t = Math.min(1, (now - slide.start) / SHIFT_TIME);
-          position = slide.from.clone().lerp(slide.to, t);
+          pose = { ...place, position: slide.from.clone().lerp(slide.to, t) };
           // 预览中的让位滑到了也不能删：它停在预览格上，不是 thing.place()
           if (t >= 1 && !this.held) this.slides.delete(thing.index);
         }
       }
-      this.drawn.set(thing.index, position.clone());
+      this.drawn.set(thing.index, pose.position.clone());
 
       renders.push({
         thingIndex: thing.index,
-        place: { ...place, position },
+        place: pose,
         selected: false,
         hovered: false,
         held,
@@ -730,8 +769,52 @@ export class TableView {
         highlighted: this.chiTiles.has(this.entryOf(thing.index)?.tileId ?? -1),
       });
     }
+    // 散牌区以外正在补间的牌：牌河、亮词区、牌墙、别家手牌
+    const looseSet = new Set(loose.map((t) => t.index));
+    for (const index of [...this.tweens.keys()]) {
+      if (looseSet.has(index)) continue;
+      const thing = this.things[index];
+      if (!thing) {
+        this.tweens.delete(index);
+        continue;
+      }
+      renders.push({
+        thingIndex: index,
+        place: this.tweenPose(thing, now),
+        selected: false,
+        hovered: false,
+        held: false,
+        temporary: false,
+        bottom: false,
+      });
+    }
     if (!this.held && this.slides.size === 0) this.drawn.clear();
     this.objectView.updateThings(renders);
+  }
+
+  /** 补间中的姿态（ease-out cubic，位置 lerp、朝向 slerp）。到点了就删掉这段补间、返回终点 */
+  private tweenPose(thing: Thing, now: number): Place {
+    const tw = this.tweens.get(thing.index)!;
+    const place = thing.place();
+    const t = Math.min(1, (now - tw.start) / TWEEN_TIME);
+    if (t >= 1) {
+      this.tweens.delete(thing.index);
+      this.shown.set(thing.index, place);
+      return place;
+    }
+    const k = 1 - (1 - t) ** 3; // 起步快、落定慢：一眼看出往哪飞，落点看得清
+    const pose: Place = {
+      ...place,
+      position: tw.from.position.clone().lerp(place.position, k),
+      rotation: tw.from.rotation.clone().slerp(place.rotation, k),
+    };
+    this.shown.set(thing.index, pose);
+    return pose;
+  }
+
+  /** 还有牌在补间（测试、回放层用） */
+  get animating(): boolean {
+    return this.tweens.size > 0;
   }
 
   /** 这一帧可拾取的牌（自己散牌区，含暗词）。`MouseUi` 每帧把它写进代理体 */
@@ -908,6 +991,8 @@ export class TableView {
     this.hovered = null;
     this.slides.clear();
     this.drawn.clear();
+    this.tweens.clear();
+    this.shown.clear();
   }
 
   /** 测试用：读回这一帧每个 Thing 停在哪儿 */

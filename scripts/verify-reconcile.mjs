@@ -23,6 +23,8 @@ const a = await import("../src/table3d/thing-assign.ts");
 // 不变式 3 的判定与单元测试共用同一份，不在脚本里另写一套——
 // T2.1 改过一次规则（摸牌从右端加、右端满了从右往里挤空隙），两处各写一份就是这样漏掉的
 const { suffixShiftError } = await import("../src/table3d/test-helpers.ts");
+// T5.1 推演不变式：fold(上一步 state, events) ≡ 这一步 state。判定与单测共用 replayDiff
+const { replayDiff } = await import("../src/table3d/replay.ts");
 
 const DECK_SIZE = 108;
 let playerId = null;
@@ -94,6 +96,10 @@ const slotOf = (slots) => new Map(slots.flatMap((e, i) => (e ? [[e.tileId, i]] :
 const wildOf = (slots) => new Map(slots.flatMap((e) => (e ? [[e.tileId, e.wildLetter]] : [])));
 
 let steps = 0;
+/** 推演不变式验过几步（换局那一步不算：新一局的 events 从空桌开始，不接上一局的 state） */
+let replayed = 0;
+/** 推演过的事件按种类计数：没见过 chi / 点炮胡的话，那两条语义等于没验 */
+const eventKinds = {};
 const fail = (msg) => {
   console.error("✗", msg);
   process.exit(1);
@@ -182,8 +188,16 @@ for (let round = 0; games < GAMES; round++) {
           }
         : { kind: "pass" };
     env = await api(`/api/matches/${matchId}/action`, { method: "POST", body: JSON.stringify(body) });
+    const bad = replayDiff(state, env.events, env.state);
+    if (bad) fail(`推演不变式：局${round}步${step} ${bad}\n  events=${JSON.stringify(env.events)}`);
+    replayed++;
+    for (const e of env.events) {
+      const k = e.t === "win" ? (e.selfDrawn ? "win(自摸)" : "win(点炮)") : e.t;
+      eventKinds[k] = (eventKinds[k] ?? 0) + 1;
+    }
   }
   console.log(`  第 ${round + 1} 场：累计 ${games}/${GAMES} 局、${steps} 步`);
 }
 
-console.log(`✓ ${games} 局 / ${steps} 步，五条不变式全部成立`);
+console.log(`✓ ${games} 局 / ${steps} 步，五条不变式全部成立；推演不变式验了 ${replayed} 步`);
+console.log(`  推演过的事件：${JSON.stringify(eventKinds)}`);

@@ -246,20 +246,12 @@ export function layout(state: State, loose: LooseSlots, display: DisplayState): 
   // 开局 52 张发出去，正好啃掉玩家侧那 30 张和下家的 22 张：玩家面前的墙一开局
   // 就空了，与真牌桌一致。**这就是为什么不能各摸各的**——各家从自己面前摸的话，
   // 四堵墙会同进同退地一起变矮，那不是麻将。
-  const chain: Array<{ seat: number; stack: number; layer: number }> = [];
-  for (let seat = 0; seat < PLAYERS; seat++) {
-    for (let stack = 0; stack < wallStacks(seat); stack++) {
-      // 一墩两张，先取上层（layer = WALL_LAYERS-1）再取下层
-      for (let layer = WALL_LAYERS - 1; layer >= 0; layer--) {
-        chain.push({ seat, stack, layer });
-      }
-    }
-  }
+  const chain = wallChain();
   for (let k = chain.length - state.wallLeft; k < chain.length; k++) {
-    const at = chain[k];
-    if (!at) continue; // wallLeft 比整副牌还多，不可能，但不为它崩
+    const slotName = chain[k];
+    if (!slotName) continue; // wallLeft 比整副牌还多，不可能，但不为它崩
     out.push({
-      slotName: `wall.${at.stack}.${at.layer}@${at.seat}`,
+      slotName,
       typeIndex: UNKNOWN_FACE,
       backVariant: 0,
       rotationIndex: ONLY, // 牌墙的 rotations 只有 [FACE_DOWN]，0 就是背面
@@ -267,6 +259,21 @@ export function layout(state: State, loose: LooseSlots, display: DisplayState): 
   }
 
   return out;
+}
+
+/**
+ * 牌墙那条全局逆时针链，按摸牌顺序排的槽位名（一墩两张，先上层后下层）。
+ * 画出来的是**后 wallLeft 项**；下一张被摸走的是 `chain[length − wallLeft]`。
+ * 回放层（T5.1）靠它知道「摸牌是从牌墙哪一格飞出来的」
+ */
+export function wallChain(): string[] {
+  const chain: string[] = [];
+  for (let seat = 0; seat < PLAYERS; seat++) {
+    for (let stack = 0; stack < wallStacks(seat); stack++) {
+      for (let layer = WALL_LAYERS - 1; layer >= 0; layer--) chain.push(`wall.${stack}.${layer}@${seat}`);
+    }
+  }
+  return chain;
 }
 
 /** 牌面编号必须落在图集的正面段里。测试与运行时自检共用 */

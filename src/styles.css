@@ -1892,6 +1892,37 @@ button.footer-link {
   display: none;
 }
 
+/* T5.1：回放气泡（「亮 WINDOW」「吃 Z」「胡」），同 Mahjong 项目的 say-ui：弹入 0.2s、停 1.2s、淡出 0.3s。
+   left/top 是气泡的中心点，由 mainLoop 按投影算好并夹在窗口里；translate 只负责居中，动画走 scale，互不覆盖 */
+.table3d-say {
+  position: fixed;
+  visibility: hidden;
+  transform: translate(-50%, -50%);
+  padding: 6px 16px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 10px;
+  border: 1px solid #f5c542;
+  background: rgba(20, 20, 20, 0.88);
+  color: #ffe08a;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 8;
+  animation: table3d-say-in 0.2s ease-out both;
+}
+.table3d-say.out {
+  animation: table3d-say-out 0.3s ease-in both;
+}
+@keyframes table3d-say-in {
+  from { opacity: 0; scale: 0.6; }
+  to { opacity: 1; scale: 1; }
+}
+@keyframes table3d-say-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 /* T6.5：已胡各家座位旁的「第 N 胡」，每帧按投影定位 */
 .table3d-win-mark {
   position: fixed;
