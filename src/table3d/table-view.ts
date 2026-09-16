@@ -219,7 +219,11 @@ export class TableView {
 
   /** 手牌区大小写开关（§4.9）。纯显示，只作用于手牌区 */
   setLowercase(lowercase: boolean): void {
+    if (this.display.lowercase === lowercase) return;
     this.display = { lowercase };
+    // 切完立刻重画。走的是快路径（只改 typeIndex、不重建，`thing-group.ts` 的 updateTypes）。
+    // 还没吃过 envelope 时没东西可画，下一次 apply 自然会用上新值
+    if (this.lastEnv) this.saveAndCommit();
   }
 
   /**
@@ -265,7 +269,8 @@ export class TableView {
       const saved = persist.load(env.matchId);
       if (saved) {
         this.nextTileId = saved.nextTileId;
-        this.display = saved.display;
+        // 大小写是**本机偏好**（T2.3b，`hand-case.ts`），不跟着牌局走：存档里那份照旧写、
+        // 但读的时候不采用，否则换一局、换一场就忘了玩家的习惯
         // 存档是同一场上一局留下的（别的标签页开了下一局、然后刷新）：散牌区身份不能带过来，
         // 但 nextTileId 照用——tileId 跨局也永不回收
         const sameGame = saved.gameIndex === undefined || saved.gameIndex === gameIndexOf(env);
@@ -1089,6 +1094,11 @@ export class TableView {
   /** 测试用：读回这一帧每个 Thing 停在哪儿 */
   get slotNames(): ReadonlyMap<number, string> {
     return this.lastSlotName;
+  }
+
+  /** 测试用：读回某个 Thing 已提交的牌面编号（大小写切换钉着它） */
+  faceOfThing(thingIndex: number): number {
+    return this.committed[thingIndex];
   }
 
   /** 测试用：读回散牌区那份记忆 */

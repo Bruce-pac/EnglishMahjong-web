@@ -50,11 +50,23 @@ export function configRows(config: State["config"]): Array<{ label: string; valu
   ];
 }
 
-/** 数据只来自服务端下发的 `state.config`——本地那份在刷新恢复时是默认值，不可信 */
-export function ConfigBar({ config }: { config: State["config"] | null }) {
+/**
+ * 数据只来自服务端下发的 `state.config`——本地那份在刷新恢复时是默认值，不可信。
+ *
+ * `onPeek`：鼠标移进来（或键盘聚焦）时通知调用方。右上角同一个角落里还有 ⚙ 面板，
+ * 两张同时展开会叠在一起、字互相压着（审查实测重叠约 86px），所以这里一展开就让 ⚙ 收起。
+ */
+export function ConfigBar({ config, onPeek }: { config: State["config"] | null; onPeek?: () => void }) {
   if (!config) return null;
   return (
-    <div className="table3d-config" tabIndex={0} role="group" aria-label="本场玩法">
+    <div
+      className="table3d-config"
+      tabIndex={0}
+      role="group"
+      aria-label="本场玩法"
+      onMouseEnter={onPeek}
+      onFocus={onPeek}
+    >
       <span className="table3d-config-icon" aria-hidden="true">
         ⓘ
       </span>

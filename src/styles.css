@@ -2381,3 +2381,73 @@ button.footer-link {
 .table3d-config-label {
   color: #9fb8ab;
 }
+
+/* T2.3b：右上角偏好面板（⚙），和 ⓘ 并排。ⓘ 悬停展开（只读），这个点击展开（可改） */
+.table3d-prefs {
+  position: absolute;
+  top: 16px;
+  right: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  z-index: 9;
+}
+.table3d-prefs-btn {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #e8f2ec;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.table3d-prefs-btn:hover,
+.table3d-prefs-btn[aria-expanded="true"] {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.table3d-prefs-panel {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #e8f2ec;
+  font-size: 13px;
+}
+.table3d-prefs-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.table3d-prefs-label {
+  color: #9fb8ab;
+}
+.table3d-prefs-seg {
+  display: flex;
+  gap: 4px;
+}
+.table3d-prefs-opt {
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: transparent;
+  color: #e8f2ec;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.table3d-prefs-opt.on {
+  border-color: var(--gold);
+  background: rgba(255, 210, 74, 0.16);
+  color: var(--gold);
+}
+.table3d-prefs-note {
+  margin: 6px 0 0;
+  max-width: 180px;
+  color: #8fb8a4;
+  font-size: 11px;
+  line-height: 1.4;
+}

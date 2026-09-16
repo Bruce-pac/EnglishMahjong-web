@@ -26,6 +26,8 @@ import { winMarkers, type WinMarker } from "./win-marker";
 import { actorOf, boardModel, nextReplayActor } from "./board-model";
 import { CenterBoard } from "./center-board";
 import { ConfigBar } from "./ConfigBar";
+import { PrefsPanel } from "./PrefsPanel";
+import { readHandCase, writeHandCase } from "./hand-case";
 
 /**
  * 3D 页自己开局用的配置。
@@ -176,6 +178,14 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   const [hintsOn, setHintsOn] = useState(false);
   /** 本场玩法配置（T2.3a）。只认服务端下发的那份：本地开局配置在刷新恢复时是默认值 */
   const [config, setConfig] = useState<State["config"] | null>(null);
+  // ---- T2.3b 偏好 ----
+  /** ⚙ 面板开着没有。点图标、点面板外、按 Esc 都能收 */
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  /** 手牌区小写。**全局偏好**，跨局跨场跨刷新，见 hand-case.ts */
+  const [lowercase, setLowercase] = useState(readHandCase);
+  const lowercaseRef = useRef(lowercase);
+  /** 切大小写：写全局键 + 让 TableView 立刻重画（effect 里挂上来） */
+  const caseRef = useRef<((lowercase: boolean) => void) | null>(null);
   /** 这一次决策服务端给的提示（提示关闭时恒为空） */
   const [hintList, setHintList] = useState<Hint[]>([]);
   const [hintOpen, setHintOpen] = useState(false);
@@ -311,6 +321,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     const onMouseDown = (e: MouseEvent) => {
       // 在画面上按下（点别处、开始拖动）都关掉字母选择器。选择器本身在画布外面，点它不会走到这里
       closeWildPicker();
+      setPrefsOpen(false); // 点画面别处就收起 ⚙ 面板（面板本身在画布外，点它不会走到这里）
       if (e.button !== 0 || !tableView || !mouseUi || !hasMouse) return;
       if (tableView.hoveredThing !== null) {
         const z = tableView.dragZ;
@@ -404,7 +415,10 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       // 输入框里打字不该把镜头晃起来（T6.1 的吃牌输入框就是个 input）
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (e.key === "Escape") closeWildPicker();
+      if (e.key === "Escape") {
+        closeWildPicker();
+        setPrefsOpen(false);
+      }
       if (keys.has(e.key)) return;
       keys.add(e.key);
 
@@ -1007,6 +1021,14 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       objectView = new ObjectView(mainGroup, assetLoader);
       const tv = new TableView(objectView);
       tableView = tv;
+      // 全局偏好为准（存档里的 display 已经不读了）
+      tv.setLowercase(lowercaseRef.current);
+      caseRef.current = (lower) => {
+        lowercaseRef.current = lower;
+        writeHandCase(lower);
+        setLowercase(lower);
+        tv.setLowercase(lower);
+      };
       mouseUi = new MouseUi(mainGroup);
 
       // 拉 envelope：刷新回来时优先接管原来那局（散牌区顺序存在 localStorage 里，
@@ -1037,6 +1059,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     return () => {
       alive = false;
       passRef.current = null;
+      caseRef.current = null;
       actionsRef.current = null;
       chiRef.current = null;
       nextRef.current = null;
@@ -1138,7 +1161,13 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           {b.text}
         </div>
       ))}
-      <ConfigBar config={config} />
+      <ConfigBar config={config} onPeek={() => setPrefsOpen(false)} />
+      <PrefsPanel
+        open={prefsOpen}
+        lowercase={lowercase}
+        onToggleOpen={() => setPrefsOpen((o) => !o)}
+        onLowercase={(lower) => caseRef.current?.(lower)}
+      />
       <button className="table3d-back" onClick={onBack}>
         ← 返回
       </button>
