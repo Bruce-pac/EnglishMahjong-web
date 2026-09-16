@@ -2328,3 +2328,56 @@ button.footer-link {
   border-color: var(--gold);
   color: var(--gold);
 }
+
+/* T2.3a：右上角玩法配置条。图标常驻，悬停 / 聚焦才展开面板——不用 JS 状态，
+   node 环境的单测测不了 hover，交给浏览器实测。视觉与 .table3d-back 同一套 */
+.table3d-config {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  /* 压在回放气泡（z-index 8）之上，结算面板（20）之下 */
+  z-index: 9;
+}
+.table3d-config-icon {
+  display: block;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #e8f2ec;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: default;
+}
+.table3d-config:hover .table3d-config-icon,
+.table3d-config:focus-within .table3d-config-icon {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.table3d-config-panel {
+  display: none;
+  min-width: 132px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #e8f2ec;
+  font-size: 13px;
+}
+.table3d-config:hover .table3d-config-panel,
+.table3d-config:focus-within .table3d-config-panel {
+  display: block;
+}
+.table3d-config-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0;
+}
+.table3d-config-label {
+  color: #9fb8ab;
+}

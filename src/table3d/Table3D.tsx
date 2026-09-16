@@ -25,6 +25,7 @@ import { Animation } from "./utils";
 import { winMarkers, type WinMarker } from "./win-marker";
 import { actorOf, boardModel, nextReplayActor } from "./board-model";
 import { CenterBoard } from "./center-board";
+import { ConfigBar } from "./ConfigBar";
 
 /**
  * 3D 页自己开局用的配置。
@@ -173,6 +174,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
   // ---- T6.2 提示 ----
   /** 本场开没开提示：以服务端 `state.config.hints` 为准。为假时页面上不出现任何提示入口 */
   const [hintsOn, setHintsOn] = useState(false);
+  /** 本场玩法配置（T2.3a）。只认服务端下发的那份：本地开局配置在刷新恢复时是默认值 */
+  const [config, setConfig] = useState<State["config"] | null>(null);
   /** 这一次决策服务端给的提示（提示关闭时恒为空） */
   const [hintList, setHintList] = useState<Hint[]>([]);
   const [hintOpen, setHintOpen] = useState(false);
@@ -618,6 +621,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       // 回放结束（或没有回放）：按真 envelope 决定亮哪边——结算不亮、有 pending 亮自己、其余照 turn
       board.update(boardModel(env, actorOf(env, null)));
       setHintsOn(env.state.config.hints);
+      setConfig(env.state.config);
       hintsOnFlag = env.state.config.hints;
       // 提示：决策换了（摸了新牌、轮到别家）就清掉点过的词、收起列表、取消高亮
       const decision = decisionKeyOf(env);
@@ -1134,6 +1138,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           {b.text}
         </div>
       ))}
+      <ConfigBar config={config} />
       <button className="table3d-back" onClick={onBack}>
         ← 返回
       </button>
