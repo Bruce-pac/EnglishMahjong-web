@@ -46,6 +46,7 @@ import type { ObjectView, Render } from "./object-view";
 import { assignThings } from "./thing-assign";
 import { layout, type DisplayState, type Placement } from "./placement";
 import * as persist from "./persist";
+import { syncWordLog, type WordEntry } from "./word-log";
 import { makeSlots } from "./setup-slots";
 import type { Slot } from "./slot";
 import { Thing } from "./thing";
@@ -123,6 +124,8 @@ export class TableView {
   /** A 层的记忆：哪张牌在散牌区的哪一格。**这份是要持久化的** */
   private loose: LooseSlots = [];
   private nextTileId = 1;
+  /** P18 本局词条。随散牌区一起存档、换局一起清 */
+  private words: WordEntry[] = [];
 
   private display: DisplayState = { lowercase: false };
   private matchId: string | null = null;
@@ -275,8 +278,10 @@ export class TableView {
         // 但 nextTileId 照用——tileId 跨局也永不回收
         const sameGame = saved.gameIndex === undefined || saved.gameIndex === gameIndexOf(env);
         this.loose = sameGame ? saved.loose : [];
+        this.words = sameGame ? (saved.wordLog ?? []) : [];
       } else {
         this.loose = [];
+        this.words = [];
         this.nextTileId = 1;
       }
       // 换局 = 桌上的牌全部换了一批，上一局的实例身份没有任何参考价值
@@ -296,6 +301,8 @@ export class TableView {
         : reconcileLoose(env.state.me, this.loose, this.nextTileId, consumedTileIds);
     this.loose = r.slots;
     this.nextTileId = r.nextTileId;
+    // 回放的中间步传进来的也是整个 envelope 的 events：吃牌后紧跟同词的 reveal，要看得到前面那个 chi
+    this.words = syncWordLog(this.words, env.state, env.events);
     this.saveAndCommit(pinned, true);
     if (carry) this.resumeDrag(carry);
   }
@@ -312,6 +319,7 @@ export class TableView {
         display: this.display,
         nextTileId: this.nextTileId,
         gameIndex: this.gameIndex ?? undefined,
+        wordLog: this.words,
       });
     }
 
@@ -1080,6 +1088,7 @@ export class TableView {
   resetGame(): void {
     this.cancelDrag();
     this.loose = [];
+    this.words = [];
     this.lastSlotName.clear();
     this.selectedTiles.clear();
     this.focusedKey = null;
@@ -1099,6 +1108,11 @@ export class TableView {
   /** 测试用：读回某个 Thing 已提交的牌面编号（大小写切换钉着它） */
   faceOfThing(thingIndex: number): number {
     return this.committed[thingIndex];
+  }
+
+  /** P18 本局词条，最早的在前 */
+  get wordLog(): readonly WordEntry[] {
+    return this.words;
   }
 
   /** 测试用：读回散牌区那份记忆 */

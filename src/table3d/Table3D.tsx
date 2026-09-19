@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2, Vector3 } from "three";
+import { BoxGeometry, Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2, Vector3 } from "three";
 import { Size, ThingType } from "./types";
 import { api, ApiError, type AccountState, type Envelope, type MatchConfig, type Pending, type Result, type State } from "../api";
 import { AssetLoader } from "./asset-loader";
@@ -28,6 +28,8 @@ import { CenterBoard } from "./center-board";
 import { CharacterLayer } from "./characters";
 import { ConfigBar } from "./ConfigBar";
 import { PrefsPanel } from "./PrefsPanel";
+import { WordLogPanel } from "./WordLogPanel";
+import type { WordEntry } from "./word-log";
 import { readHandCase, writeHandCase } from "./hand-case";
 
 /**
@@ -206,6 +208,12 @@ export function Table3D({
   // ---- T2.3b 偏好 ----
   /** ⚙ 面板开着没有。点图标、点面板外、按 Esc 都能收 */
   const [prefsOpen, setPrefsOpen] = useState(false);
+  // ---- P18 本局词条 ----
+  /** 📜 面板开着没有。和 ⚙ 互斥，收起的时机同 ⚙ */
+  const [logOpen, setLogOpen] = useState(false);
+  /** TableView 维护的词条（每次 apply 之后读一次），和自己的座位号 */
+  const [wordLog, setWordLog] = useState<readonly WordEntry[]>([]);
+  const [mySeatUi, setMySeatUi] = useState(0);
   /** 手牌区小写。**全局偏好**，跨局跨场跨刷新，见 hand-case.ts */
   const [lowercase, setLowercase] = useState(readHandCase);
   const lowercaseRef = useRef(lowercase);
@@ -265,6 +273,31 @@ export function Table3D({
     table.matrixAutoUpdate = false;
     table.updateMatrix();
     mainGroup.add(table);
+
+    // P16 木框：四根边条贴着桌面外缘围一圈。上下两根长出 2T 盖住四角，左右两根夹在中间。
+    // 底面在 z = −0.5，顶面 z = H − 0.5。不进 Thing 池，mouse-ui 只拾取自己的代理体，拾不到它
+    {
+      const T = 7;
+      const H = 3;
+      const c = WORLD_SIZE / 2;
+      const side = new MeshLambertMaterial({ color: 0x6b4226 });
+      const top = new MeshLambertMaterial({ color: 0x8a5a36 });
+      // BoxGeometry 的材质数组：±X、±Y、±Z，下标 4 是 +Z（顶面）
+      const mats = [side, side, side, side, top, side];
+      const bars: Array<[number, number, number, number]> = [
+        [tableSize + 2 * T, T, c, c - tableSize / 2 - T / 2],
+        [tableSize + 2 * T, T, c, c + tableSize / 2 + T / 2],
+        [T, tableSize, c - tableSize / 2 - T / 2, c],
+        [T, tableSize, c + tableSize / 2 + T / 2, c],
+      ];
+      for (const [w, h, x, y] of bars) {
+        const bar = new Mesh(new BoxGeometry(w, h, H), mats);
+        bar.position.set(x, y, H / 2 - 0.5);
+        bar.matrixAutoUpdate = false;
+        bar.updateMatrix();
+        mainGroup.add(bar);
+      }
+    }
 
     const view = new MainView(mount, mainGroup);
 
@@ -350,6 +383,7 @@ export function Table3D({
       // 在画面上按下（点别处、开始拖动）都关掉字母选择器。选择器本身在画布外面，点它不会走到这里
       closeWildPicker();
       setPrefsOpen(false); // 点画面别处就收起 ⚙ 面板（面板本身在画布外，点它不会走到这里）
+      setLogOpen(false); // 📜 同理
       if (e.button !== 0 || !tableView || !mouseUi || !hasMouse) return;
       if (tableView.hoveredThing !== null) {
         const z = tableView.dragZ;
@@ -448,6 +482,7 @@ export function Table3D({
       if (e.key === "Escape") {
         closeWildPicker();
         setPrefsOpen(false);
+        setLogOpen(false);
       }
       if (keys.has(e.key)) return;
       keys.add(e.key);
@@ -613,6 +648,7 @@ export function Table3D({
               pinnedFor(s, e, at >= 0 ? `loose.${at}@${s.me.seat}` : undefined),
             );
             if (own) consumed = [];
+            setWordLog(tableView!.wordLog);
             s = next;
             replayActor = nextReplayActor(replayActor, e);
             const stepEnv = { ...env, state: next, pending: null, result: null };
@@ -631,6 +667,8 @@ export function Table3D({
         if (!alive) return;
       }
       tableView!.apply(env, consumed);
+      setWordLog(tableView!.wordLog);
+      setMySeatUi(env.state.me.seat);
       // 最后一步已经对齐真值，解开提交锁；控件随后由 applyEnvelope 按真 envelope 刷新
       tableView!.setSubmitLocked(false);
       if (replayingFlag) {
@@ -885,6 +923,7 @@ export function Table3D({
         [],
         () => {
           tableView?.resetGame();
+          setWordLog([]);
           shownState = null; // 新一局的 events 从空桌开始，不接上一局的画面
           closeChi();
           closeWildPicker();
@@ -1149,6 +1188,9 @@ export function Table3D({
       <div className="table3d-stage">
         <div className="table3d-canvas" ref={mountRef} />
       </div>
+      {/* P17 暗角：紧跟画布、不设 z-index，DOM 里排在它后面的覆盖层自然压在它上面。
+          不叫 .overlay——3D 快捷键靠有没有 .overlay 判断 App 弹窗开着没有（T6.6） */}
+      <div className="table3d-vignette" aria-hidden="true" />
       <div className="table3d-selection" ref={selectionRef} />
       <button
         className="table3d-ungroup"
@@ -1198,24 +1240,45 @@ export function Table3D({
           {b.text}
         </div>
       ))}
-      <ConfigBar config={config} onPeek={() => setPrefsOpen(false)} />
-      {onAccount && account !== null && (
-        // T6.6：和 ⚙ ⓘ 同一排。已登录显示名字，未登录 👤；点了开账号弹窗（牌局中只能注册）。
-        // 登录态还没查到（account 为 null）时不出：那时点开只能进注册表单，而这人若其实已绑定，
-        // 会撞上「当前身份已经绑定过账号了」——牌局中又不能改走登录。「保存成绩」也是同样处理
+      <ConfigBar
+        config={config}
+        onPeek={() => {
+          setPrefsOpen(false);
+          setLogOpen(false);
+        }}
+      />
+      {/* ⚙ 左边的一排，从右往左 👤、📜（P18）。👤 宽度不定，靠 flex 排跟着走 */}
+      <div className="table3d-toprow">
+        {onAccount && account !== null && (
+          // T6.6：和 ⚙ ⓘ 同一排。已登录显示名字，未登录 👤；点了开账号弹窗（牌局中只能注册）。
+          // 登录态还没查到（account 为 null）时不出：那时点开只能进注册表单，而这人若其实已绑定，
+          // 会撞上「当前身份已经绑定过账号了」——牌局中又不能改走登录。「保存成绩」也是同样处理
 
-        <button
-          className="table3d-account"
-          onClick={onAccount}
-          title={account?.bound ? `当前登录：${account.displayName}` : "注册账号，保存单词本和战绩"}
-        >
-          {account?.bound ? account.displayName : "👤"}
-        </button>
-      )}
+          <button
+            className="table3d-account"
+            onClick={onAccount}
+            title={account?.bound ? `当前登录：${account.displayName}` : "注册账号，保存单词本和战绩"}
+          >
+            {account?.bound ? account.displayName : "👤"}
+          </button>
+        )}
+        <WordLogPanel
+          open={logOpen}
+          log={wordLog}
+          mySeat={mySeatUi}
+          onToggleOpen={() => {
+            setLogOpen((o) => !o);
+            setPrefsOpen(false);
+          }}
+        />
+      </div>
       <PrefsPanel
         open={prefsOpen}
         lowercase={lowercase}
-        onToggleOpen={() => setPrefsOpen((o) => !o)}
+        onToggleOpen={() => {
+          setPrefsOpen((o) => !o);
+          setLogOpen(false);
+        }}
         onLowercase={(lower) => caseRef.current?.(lower)}
       />
       <button className="table3d-back" onClick={onBack}>

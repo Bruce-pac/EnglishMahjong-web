@@ -9,6 +9,7 @@
 
 import { LOOSE_SLOTS } from "./layout";
 import type { LooseSlots } from "./loose-reconcile";
+import { parseWordLog, type WordEntry } from "./word-log";
 
 const VERSION = 1;
 const PREFIX = "emj3d.loose.";
@@ -28,6 +29,11 @@ export interface LooseSave {
    * 不把上一局的散牌区身份带进新一局。没有这个字段的存档按「同一局」处理
    */
   gameIndex?: number;
+  /**
+   * P18 本局词条（可选字段，不升版本号，同 `gameIndex`）。刷新后 events 为空，
+   * 吃 / 亮的来源和四家的先后只能靠它留住；读回来后仍以 state 的 melds 为准
+   */
+  wordLog?: WordEntry[];
   updatedAt: number;
 }
 
@@ -79,6 +85,8 @@ export function load(matchId: string): LooseSave | null {
     if (!Array.isArray(p.loose) || p.loose.length !== LOOSE_SLOTS) return null;
     if (!Number.isInteger(p.nextTileId)) return null;
     if (typeof p.display?.lowercase !== "boolean") return null;
+    // 词条坏了不连累散牌区：只丢词条，随后由 state 补回（不带标签）
+    p.wordLog = parseWordLog(p.wordLog);
     return p;
   } catch {
     return null;

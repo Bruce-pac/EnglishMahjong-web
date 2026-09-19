@@ -68,6 +68,16 @@ describe("存档", () => {
     expect(load("m1")).toBeNull();
   });
 
+  it("词条是坏形状：只丢词条，散牌区照常读回（P18）", () => {
+    save("m1", { loose: slots(), display: { lowercase: false }, nextTileId: 3 });
+    const raw = JSON.parse(store.getItem("emj3d.loose.m1")!);
+    store.setItem("emj3d.loose.m1", JSON.stringify({ ...raw, wordLog: 5 }));
+    const p = load("m1");
+    expect(p).not.toBeNull();
+    expect(p!.loose).toEqual(slots());
+    expect(p!.wordLog).toBeUndefined();
+  });
+
   it("坏 JSON 不能把牌局带崩", () => {
     store.setItem("emj3d.loose.m1", "{不是 json");
     expect(load("m1")).toBeNull();

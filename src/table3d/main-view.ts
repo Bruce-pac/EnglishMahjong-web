@@ -83,6 +83,8 @@ export class MainView {
     this.dummyObject = new Mesh(new PlaneGeometry(0, 0));
 
     this.renderer = new WebGLRenderer({
+      // P16：透明清屏，页面的暖色渐变透过画布——宽屏时画布内外是同一张底，边缘没有接缝
+      alpha: true,
       // 用了 EffectComposer，MSAA 在后处理链里本来就不生效，开着只是白费显存
       antialias: false,
       // 少了它 OutlinePass 在某些浏览器上会闪（Autotable 踩过，注释原话是
