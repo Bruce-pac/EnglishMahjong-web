@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2, Vector3 } from "three";
 import { Size, ThingType } from "./types";
-import { api, ApiError, type Envelope, type MatchConfig, type Pending, type Result, type State } from "../api";
+import { api, ApiError, type AccountState, type Envelope, type MatchConfig, type Pending, type Result, type State } from "../api";
 import { AssetLoader } from "./asset-loader";
 import { WILD_CANDIDATES } from "./atlas";
 import { SelectionValidator, type CheckState } from "./check";
@@ -108,7 +108,31 @@ function describeFailure(e: unknown): string {
  * 打牌（T3.4）的请求在这里发：TableView 只说「要打哪张」，本组件提交、拿回 envelope 再交还给它。
  * 单词校验（T4.1）：mainLoop 每帧把选中的牌推导成单词交给 `SelectionValidator`，变了才问服务端。
  */
-export function Table3D({ onBack }: { onBack: () => void }) {
+/**
+ * T6.6：账号 / 单词本 / 榜单三个弹窗由 `App` 渲染（账号状态机只留一份），3D 只经这些回调请求打开。
+ * **3D 不 import `components/`**——数据和回调都从 props 进来
+ */
+export interface Table3DAccountProps {
+  /** 登录态。null = 还没查到（或查失败），这时不出「保存成绩」 */
+  account?: AccountState | null;
+  /** 打开账号弹窗。牌局中只能注册：登录 / 退出会换掉本地身份，这局就接不上了 */
+  onAccount?: () => void;
+  onProfile?: () => void;
+  onLeaderboard?: () => void;
+}
+
+/** App 的全屏弹窗（`.overlay`）开着：键盘快捷键别漏到牌桌上 */
+function modalOpen(): boolean {
+  return document.querySelector(".overlay") !== null;
+}
+
+export function Table3D({
+  onBack,
+  account = null,
+  onAccount,
+  onProfile,
+  onLeaderboard,
+}: { onBack: () => void } & Table3DAccountProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   /** 框选的选框。DOM 覆盖层而不是 3D 对象（研究笔记 §4.3：恒定面向屏幕的 UI 一律用 DOM） */
   const selectionRef = useRef<HTMLDivElement>(null);
@@ -419,6 +443,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       // 输入框里打字不该把镜头晃起来（T6.1 的吃牌输入框就是个 input）
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+      // App 的账号 / 单词本 / 榜单弹窗开着（T6.6）：p、空格、z/x、Esc 都不该动牌桌
+      if (modalOpen()) return;
       if (e.key === "Escape") {
         closeWildPicker();
         setPrefsOpen(false);
@@ -1173,6 +1199,19 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         </div>
       ))}
       <ConfigBar config={config} onPeek={() => setPrefsOpen(false)} />
+      {onAccount && account !== null && (
+        // T6.6：和 ⚙ ⓘ 同一排。已登录显示名字，未登录 👤；点了开账号弹窗（牌局中只能注册）。
+        // 登录态还没查到（account 为 null）时不出：那时点开只能进注册表单，而这人若其实已绑定，
+        // 会撞上「当前身份已经绑定过账号了」——牌局中又不能改走登录。「保存成绩」也是同样处理
+
+        <button
+          className="table3d-account"
+          onClick={onAccount}
+          title={account?.bound ? `当前登录：${account.displayName}` : "注册账号，保存单词本和战绩"}
+        >
+          {account?.bound ? account.displayName : "👤"}
+        </button>
+      )}
       <PrefsPanel
         open={prefsOpen}
         lowercase={lowercase}
@@ -1406,6 +1445,10 @@ export function Table3D({ onBack }: { onBack: () => void }) {
           busy={busyUi}
           onNext={() => nextRef.current?.()}
           onBack={onBack}
+          canSave={account !== null && !account.bound}
+          onAccount={onAccount}
+          onProfile={onProfile}
+          onLeaderboard={onLeaderboard}
         />
       )}
       <div className="table3d-hint">

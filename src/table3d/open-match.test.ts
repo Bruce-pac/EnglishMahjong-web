@@ -1,5 +1,5 @@
 /**
- * 刷新恢复时，哪些错误该丢掉原来那局（T1.4 方案 §6：只有 404）。
+ * 刷新恢复时，哪些错误该丢掉原来那局（T1.4 方案 §6：404；T6.6 加上 403）。
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -38,6 +38,13 @@ describe("openMatch", () => {
 
   it("404（服务器重启、牌局已不存在）→ 清存档并开新局", async () => {
     const d = deps(new ApiError("牌局不存在", 404));
+    expect(await openMatch("old", CONFIG, d)).toBe(FRESH);
+    expect(d.clearSave).toHaveBeenCalledWith("old");
+    expect(d.newMatch).toHaveBeenCalledOnce();
+  });
+
+  it("403（换了账号，这不是你的牌局）→ 和 404 一样清存档并开新局，不卡在重试", async () => {
+    const d = deps(new ApiError("这不是你的牌局", 403));
     expect(await openMatch("old", CONFIG, d)).toBe(FRESH);
     expect(d.clearSave).toHaveBeenCalledWith("old");
     expect(d.newMatch).toHaveBeenCalledOnce();

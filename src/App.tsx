@@ -523,6 +523,9 @@ export default function App() {
    * 那会白白多拉一次档案。
    */
   const [identityRev, setIdentityRev] = useState(0);
+  /** 3D 页里打开的单词本 / 榜单（首页那两个是 Landing 自己的局部状态，3D 分支没有 Landing） */
+  const [showProfile3d, setShowProfile3d] = useState(false);
+  const [showBoard3d, setShowBoard3d] = useState(false);
   const bumpIdentity = () => setIdentityRev((n) => n + 1);
 
   // 刷新页面不该丢掉整局牌。URL 上带 ?match=<id> 就把它捞回来。
@@ -564,6 +567,7 @@ export default function App() {
     <Account
       account={account}
       initialTab={accountTab}
+      registerOnly={view === "table3d"}
       onClose={() => setAccountTab(null)}
       onDone={(displayName) => {
         setAccount({ bound: true, displayName });
@@ -597,17 +601,28 @@ export default function App() {
       return <RulesPage onBack={() => setView("landing")} />;
     }
     if (view === "table3d") {
+      // T6.6：3D 页的账号 / 单词本 / 榜单弹窗也由这里渲染——账号状态机只留一份，3D 只发请求。
+      // 牌局中只能注册（registerOnly，见 Account 文件头）：注册原地升级身份、牌局归属不变
       return (
-        <Suspense fallback={<div className="table3d-page" />}>
-          <Table3D
-            onBack={() => {
-              // 3D 页往地址栏写了 ?match&view=3d，走的时候要擦掉——
-              // 不擦的话回首页刷新又会被弹回 3D 页
-              history.replaceState(null, "", window.location.pathname);
-              setView("landing");
-            }}
-          />
-        </Suspense>
+        <>
+          <Suspense fallback={<div className="table3d-page" />}>
+            <Table3D
+              onBack={() => {
+                // 3D 页往地址栏写了 ?match&view=3d，走的时候要擦掉——
+                // 不擦的话回首页刷新又会被弹回 3D 页
+                history.replaceState(null, "", window.location.pathname);
+                setView("landing");
+              }}
+              account={account}
+              onAccount={() => setAccountTab("register")}
+              onProfile={() => setShowProfile3d(true)}
+              onLeaderboard={() => setShowBoard3d(true)}
+            />
+          </Suspense>
+          {accountModal}
+          {showProfile3d && <Profile onClose={() => setShowProfile3d(false)} />}
+          {showBoard3d && <Leaderboard onClose={() => setShowBoard3d(false)} />}
+        </>
       );
     }
     return (

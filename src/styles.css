@@ -212,6 +212,12 @@ header b {
 .sheet-account {
   max-width: 380px;
 }
+/* 只能注册时（3D 牌局中，T6.6）标签栏换成一行标题 */
+.account-title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+}
 .account-tabs {
   display: flex;
   gap: 8px;
@@ -2145,6 +2151,7 @@ button.footer-link {
 .table3d-settle-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 10px; /* T6.6 加了 [单词本]，和 [返回] / [下一局] 并排，别贴在一起 */
   margin-top: 16px;
 }
 .table3d-act-btn.primary {
@@ -2450,4 +2457,47 @@ button.footer-link {
   color: #8fb8a4;
   font-size: 11px;
   line-height: 1.4;
+}
+
+/* T6.6：右上角的账号入口，和 ⚙ ⓘ 同一排、同一套样式。已登录显示名字（过长截断） */
+.table3d-account {
+  position: absolute;
+  top: 16px;
+  right: 108px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #e8f2ec;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  z-index: 9;
+}
+.table3d-account:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+/* T6.6：结算面板里的学习档案入口 */
+.table3d-standing {
+  margin: 10px 0 0;
+  color: #cfe3d8;
+  font-size: 13px;
+}
+.table3d-text-link {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--gold);
+  font: inherit;
+  cursor: pointer;
+}
+.table3d-settle-save {
+  margin-top: 10px;
 }

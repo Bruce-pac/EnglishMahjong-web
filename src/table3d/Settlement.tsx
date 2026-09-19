@@ -7,7 +7,8 @@
  * 错题（`missed`）是服务端给的教学反馈，照实显示：这些牌本来能拼出来、玩家没看出来。
  */
 
-import type { Result, ResultRow, State } from "../api";
+import { useEffect, useState } from "react";
+import { api, type MyStanding, type Result, type ResultRow, type State } from "../api";
 import { AI_NAMES } from "./names";
 
 /**
@@ -25,6 +26,29 @@ export function finalStanding(matchScores: readonly number[]): Array<{ seat: num
   return matchScores.map((score, seat) => ({ seat, score })).sort((a, b) => b.score - a.score);
 }
 
+/**
+ * 场末「我在全站什么位置」一行（T6.6）。照 2.5D `Scoreboard.tsx` 的 `StandingLine` 写，**不 import 它**。
+ * 自己拉数据：跨场累积的档案，和这一局的结果无关。拉失败或还没数据就整行不显示。
+ * `initial` 只给单测用（node 里 useEffect 不跑，拉不到数据）
+ */
+export function StandingLine({ onOpen, initial = null }: { onOpen: () => void; initial?: MyStanding | null }) {
+  const [me, setMe] = useState<MyStanding | null>(initial);
+  useEffect(() => {
+    if (initial) return;
+    api.leaderboard().then((d) => setMe(d.me), () => setMe(null));
+  }, [initial]);
+  if (!me) return null;
+  return (
+    <p className="table3d-standing">
+      全站累计第 <b>{me.scoreRank}</b> 名
+      {me.scorePercentile !== null && <> · 平均分超过 <b>{me.scorePercentile}%</b> 的其他玩家</>}
+      <button className="table3d-text-link" onClick={onOpen}>
+        看完整榜单 →
+      </button>
+    </p>
+  );
+}
+
 const nameOf = (seat: number) => (seat === 0 ? "你" : AI_NAMES[seat]);
 const tileLabel = (t: string) => (t === "1" || t === "2" ? "★" : t.toUpperCase());
 
@@ -36,9 +60,29 @@ interface Props {
   busy: boolean;
   onNext: () => void;
   onBack: () => void;
+  /** 未绑定账号（已查过登录态、确认匿名）时为 true：全场结束时出「保存成绩到账号」 */
+  canSave?: boolean;
+  /** 打开账号弹窗（牌局中只能注册）。弹窗由 App 渲染 */
+  onAccount?: () => void;
+  onProfile?: () => void;
+  onLeaderboard?: () => void;
+  /** 单测用：全站排名那一行的数据 */
+  standing?: MyStanding | null;
 }
 
-export function Settlement({ result, state, matchFinished, busy, onNext, onBack }: Props) {
+export function Settlement({
+  result,
+  state,
+  matchFinished,
+  busy,
+  onNext,
+  onBack,
+  canSave = false,
+  onAccount,
+  onProfile,
+  onLeaderboard,
+  standing,
+}: Props) {
   const rows = rankRows(result.rows);
   return (
     <div className="table3d-settle" role="dialog" aria-label="结算">
@@ -127,7 +171,20 @@ export function Settlement({ result, state, matchFinished, busy, onNext, onBack 
           </div>
         )}
 
+        {/* T6.6 学习档案的入口，出现条件照 2.5D 结算页 */}
+        {matchFinished && onLeaderboard && <StandingLine onOpen={onLeaderboard} initial={standing} />}
+        {matchFinished && canSave && onAccount && (
+          <button className="table3d-act-btn table3d-settle-save" onClick={onAccount}>
+            💾 保存成绩到账号（换设备也能找回）
+          </button>
+        )}
+
         <div className="table3d-settle-actions">
+          {onProfile && (
+            <button className="table3d-act-btn" onClick={onProfile}>
+              📖 单词本
+            </button>
+          )}
           {matchFinished ? (
             <button className="table3d-act-btn" onClick={onBack}>
               返回

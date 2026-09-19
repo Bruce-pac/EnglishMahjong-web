@@ -80,3 +80,48 @@ describe("结算面板", () => {
     expect(html).toContain("名次按 4 局累计总分排定");
   });
 });
+
+describe("T6.6 学习档案入口", () => {
+  const state: State = { ...structuredClone(fixtureGames()[0].steps[2].state), gamesPlayed: 4, maxGames: 4, matchScores: [30, 50, 10, 20] };
+  const standing = { scoreRank: 7, scorePercentile: 62 } as unknown as import("../api").MyStanding;
+  const html = (matchFinished: boolean, canSave: boolean) =>
+    renderToStaticMarkup(
+      <Settlement
+        result={baseResult()}
+        state={state}
+        matchFinished={matchFinished}
+        busy={false}
+        onNext={() => {}}
+        onBack={() => {}}
+        canSave={canSave}
+        onAccount={() => {}}
+        onProfile={() => {}}
+        onLeaderboard={() => {}}
+        standing={standing}
+      />,
+    );
+
+  it("保存成绩：只在全场结束且未绑定时出现", () => {
+    expect(html(true, true)).toContain("保存成绩到账号");
+    expect(html(true, false)).not.toContain("保存成绩到账号");
+    expect(html(false, true)).not.toContain("保存成绩到账号");
+  });
+
+  it("全站排名那一行与榜单入口：只在全场结束时出现", () => {
+    expect(html(true, false)).toContain("全站累计第 <b>7</b> 名");
+    expect(html(true, false)).toContain("看完整榜单");
+    expect(html(false, false)).not.toContain("全站累计");
+  });
+
+  it("没有排名数据（拉失败 / 还没数据）：整行不显示", () => {
+    const h = renderToStaticMarkup(
+      <Settlement result={baseResult()} state={state} matchFinished busy={false} onNext={() => {}} onBack={() => {}} onLeaderboard={() => {}} standing={null} />,
+    );
+    expect(h).not.toContain("全站累计");
+  });
+
+  it("单词本：每局都有", () => {
+    expect(html(false, false)).toContain("单词本");
+    expect(html(true, false)).toContain("单词本");
+  });
+});

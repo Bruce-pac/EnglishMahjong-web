@@ -15,10 +15,14 @@ export interface OpenMatchDeps {
 }
 
 /**
- * **只有 404 才清存档、开新局**（T1.4 方案 §6）。
+ * **只有 404 和 403 才清存档、开新局**（T1.4 方案 §6；403 是 T6.6 加的）。
  *
  * 404 的意思是「服务器上已经没有这一局了」——牌局只存内存，服务器一重启就没了
  * （DESIGN.md §3 的有意取舍），这时存档再留着也接不回去。
+ *
+ * 403 是「这不是你的牌局」（`api.py` 的归属校验）：在首页登录了另一个账号、或退出登录，
+ * 本地 playerId 换了，再用原来带 `?match=` 的地址回来就是它。对**当前这个身份**来说，
+ * 那一局和不存在没有区别——重试多少次都是 403。所以和 404 等价：清存档、开新局，别卡在「重试」。
  *
  * 其余错误一律原样抛出、**不清存档、不开新局**：网络抖一下、撞上限流（429）、
  * 服务端报 500，原来那局都还在服务器上，玩家排好的手牌顺序也还在 localStorage 里。
@@ -34,7 +38,7 @@ export async function openMatch(
   try {
     return await deps.resume(savedId);
   } catch (e) {
-    if (!(e instanceof ApiError && e.status === 404)) throw e;
+    if (!(e instanceof ApiError && (e.status === 404 || e.status === 403))) throw e;
     deps.clearSave(savedId);
     return deps.newMatch(config);
   }

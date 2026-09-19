@@ -7,6 +7,10 @@
  *   对着裸的注册表单反复撞「当前身份已绑定」，还搞不清自己是谁。
  *
  * 退出登录 = 领一个全新匿名身份，于是共享设备（课堂机房）上换个人能建别的账号。
+ *
+ * `registerOnly`（T6.6，3D 牌局里用）：只能注册，不给登录 / 切换 / 退出。
+ * 登录和退出都会换掉本地 playerId，而牌局有归属校验——正打着的这局当场作废；
+ * 注册是把当前 playerId 原地升级，牌局归属不变，所以牌局中只放行它。默认 false，行为不变。
  */
 
 import { useState } from "react";
@@ -24,14 +28,17 @@ export function Account({
   onClose,
   onDone,
   onLogout,
+  registerOnly = false,
 }: {
   account: AccountState | null;
   initialTab?: Tab;
   onClose: () => void;
   onDone: (displayName: string) => void;
   onLogout: () => void;
+  /** 只能注册（牌局中）：不出登录标签，已登录时不出切换 / 退出 */
+  registerOnly?: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const [tab, setTab] = useState<Tab>(registerOnly ? "register" : initialTab);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -53,6 +60,9 @@ export function Account({
           <p className="account-note">
             单词本和战绩都存在这个账号名下，换设备登录就能找回。
           </p>
+          {registerOnly ? (
+            <p className="account-note">要切换账号或退出登录，请先回到首页——在牌局里换身份，这局就接不上了。</p>
+          ) : (
           <div className="account-actions">
             <button className="btn btn-ghost" onClick={() => setSwitching(true)}>
               切换账号
@@ -76,6 +86,7 @@ export function Account({
               退出登录
             </button>
           </div>
+          )}
           <button className="account-close" onClick={onClose}>
             关闭
           </button>
@@ -136,26 +147,31 @@ export function Account({
   return (
     <div className="overlay" onClick={onClose}>
       <div className="sheet sheet-account" onClick={(e) => e.stopPropagation()}>
-        <div className="account-tabs">
-          <button
-            className={tab === "register" ? "account-tab on" : "account-tab"}
-            onClick={() => {
-              setTab("register");
-              setError(null);
-            }}
-          >
-            注册
-          </button>
-          <button
-            className={tab === "login" ? "account-tab on" : "account-tab"}
-            onClick={() => {
-              setTab("login");
-              setError(null);
-            }}
-          >
-            登录
-          </button>
-        </div>
+        {registerOnly ? (
+          // 只剩一个标签时，标签栏会被拉成一整条、看着像按钮——直接写成标题
+          <h3 className="account-title">注册账号</h3>
+        ) : (
+          <div className="account-tabs">
+            <button
+              className={tab === "register" ? "account-tab on" : "account-tab"}
+              onClick={() => {
+                setTab("register");
+                setError(null);
+              }}
+            >
+              注册
+            </button>
+            <button
+              className={tab === "login" ? "account-tab on" : "account-tab"}
+              onClick={() => {
+                setTab("login");
+                setError(null);
+              }}
+            >
+              登录
+            </button>
+          </div>
+        )}
 
         <p className="account-note">
           {tab === "register"
