@@ -25,6 +25,7 @@ import { Animation } from "./utils";
 import { winMarkers, type WinMarker } from "./win-marker";
 import { actorOf, boardModel, nextReplayActor } from "./board-model";
 import { CenterBoard } from "./center-board";
+import { CharacterLayer } from "./characters";
 import { ConfigBar } from "./ConfigBar";
 import { PrefsPanel } from "./PrefsPanel";
 import { readHandCase, writeHandCase } from "./hand-case";
@@ -248,6 +249,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
     const board = new CenterBoard(document.createElement("canvas"), view.maxAnisotropy);
     mainGroup.add(board.mesh);
     board.mesh.updateMatrixWorld(true); // 全手动矩阵（main-view.ts），加进来要自己算一次
+
+    // T2.3d 三个 AI 角色：只在透视模式显示，第一次切到透视才下载（正交的玩家一个字节都不多下）
+    const cast = new CharacterLayer(mainGroup);
 
     // ---- 相机的三个连续参数（D13）----
     // 全部由 Animation 驱动，150ms 缓动。瞬切很晕，而且看不出是自己按的
@@ -586,7 +590,9 @@ export function Table3D({ onBack }: { onBack: () => void }) {
             s = next;
             replayActor = nextReplayActor(replayActor, e);
             const stepEnv = { ...env, state: next, pending: null, result: null };
-            board.update(boardModel(stepEnv, actorOf(stepEnv, replayActor)));
+            const actor = actorOf(stepEnv, replayActor);
+            board.update(boardModel(stepEnv, actor));
+            cast.setActor(actor); // 前倾和记分盘的亮边同一家
             const line = sayOf(e);
             if (line && e.seat !== undefined) say(e.seat, line);
             // 牌 180ms 飞到位，剩下的时间静止；吃、亮词、胡停得更久，气泡读得完
@@ -634,6 +640,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       setWallLeft(env.state.wallLeft);
       // 回放结束（或没有回放）：按真 envelope 决定亮哪边——结算不亮、有 pending 亮自己、其余照 turn
       board.update(boardModel(env, actorOf(env, null)));
+      cast.setActor(actorOf(env, null));
       setHintsOn(env.state.config.hints);
       setConfig(env.state.config);
       hintsOnFlag = env.state.config.hints;
@@ -978,7 +985,8 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         // 回放气泡跟着座位走，锚点同「第 N 胡」。优先放在锚点上方（让开「第 N 胡」）；
         // 对家那排贴着画面上沿，上方放不下就翻到牌排下方。左右夹在窗口里——右家亮个长词不能出屏
         for (const [seat, el] of bubbleEls.current) {
-          const p = mouseUi.project(tableView.looseRowAnchor(seat), view.camera);
+          // 透视且角色已加载：从角色头顶冒出；否则（含正交）照旧在牌排上方
+          const p = mouseUi.project(cast.bubbleAnchor(seat) ?? tableView.looseRowAnchor(seat), view.camera);
           const rect = view.canvas.getBoundingClientRect();
           const ax = rect.left + ((p.x + 1) / 2) * rect.width;
           const ay = rect.top + ((1 - p.y) / 2) * rect.height;
@@ -996,13 +1004,15 @@ export function Table3D({ onBack }: { onBack: () => void }) {
         for (const m of marks) {
           const el = markerEls.current.get(m.seat);
           if (!el) continue;
-          const p = mouseUi.project(tableView.looseRowAnchor(m.seat), view.camera);
+          // 透视且角色已加载：挪到角色身侧，别压在角色身上（T2.3d）；正交照旧在牌排上方
+          const p = mouseUi.project(cast.winMarkerAnchor(m.seat) ?? tableView.looseRowAnchor(m.seat), view.camera);
           const rect = view.canvas.getBoundingClientRect();
           el.style.left = `${rect.left + ((p.x + 1) / 2) * rect.width}px`;
           el.style.top = `${rect.top + ((1 - p.y) / 2) * rect.height}px`;
           el.style.visibility = "visible";
         }
       }
+      cast.update(performance.now(), view.isPerspective);
       view.render();
     };
     mainLoop();
@@ -1085,6 +1095,7 @@ export function Table3D({ onBack }: { onBack: () => void }) {
       objectView?.dispose();
       tableGeometry.dispose();
       board.dispose();
+      cast.dispose();
       tableMaterial.dispose();
       view.dispose();
     };

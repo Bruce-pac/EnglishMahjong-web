@@ -2,7 +2,9 @@
  * T2.3c：三个 AI 角色模型的加载器（`web/img/characters.glb`，由 `art/build_characters.py` 生成）。
  *
  * - **懒加载**：只在第一次调用时才发请求。T2.3d 会在第一次切到透视时调——正交模式的玩家一个字节都不该多下。
- *   连 glb 的 URL 都放在动态 import 里，不在模块顶层 import，免得它被当成首屏资源预加载
+ *   glb 的 URL 用静态 `?url` 导入：那只是一个字符串，Vite 不会预加载资源 URL，真正的请求在 `loadAsync` 才发。
+ *   **不要改成动态 `import()`**：懒加载的 3D chunk 里一出现动态 import，就要去主包借预加载辅助函数，
+ *   主包因此多导出一个绑定、变大（T2.3d 实测 205.00 → 205.01 kB，同 `names.ts` 文件头那条）
  * - **Draco 解码器走本站**（`public/draco/`，见那里的 README）。`DRACOLoader` 的默认路径是 Google 的 CDN，
  *   运行时零外部依赖，所以必须显式设成本地
  * - 材质照 `asset-loader.ts` 降级成 Lambert、只留 `map`
@@ -13,6 +15,7 @@ import { Box3, LinearSRGBColorSpace, Mesh, MeshLambertMaterial, SRGBColorSpace, 
 import type { Material, MeshStandardMaterial, Object3D } from "three";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import url from "../../img/characters.glb?url";
 
 /** 有角色的三个座位（0 是自己，不画） */
 export const CHARACTER_SEATS = [1, 2, 3] as const;
@@ -38,7 +41,6 @@ export function loadCharacters(): Promise<Characters> {
 }
 
 async function load(): Promise<Characters> {
-  const { default: url } = await import("../../img/characters.glb?url");
   const draco = new DRACOLoader();
   draco.setDecoderPath(import.meta.env.BASE_URL + "draco/");
   const loader = new GLTFLoader();
