@@ -190,7 +190,31 @@ describe("TableView 整组拖动", () => {
   it("暗词的牌走 Custom 轨、进暗词框列表", async () => {
     const { view, objectView } = await setup();
     expect(view.looseSlots.filter((e) => e?.groupId !== undefined)).toHaveLength(3);
-    expect(objectView.groupedObjects).toHaveLength(3);
+    expect(objectView.groupedObjects[0]).toHaveLength(3);
+    expect(objectView.groupedObjects[1]).toHaveLength(0);
+  });
+
+  it("拖动中的帧（update 路径，不经 refreshFlags）暗词框也在：CAT、DOG 仍各占一个通道（P8）", async () => {
+    const { view, objectView } = await setup();
+    const { Vector3 } = await import("three");
+    const { fixtureGames } = await import("./test-helpers");
+    const state = structuredClone(fixtureGames()[0].steps[2].state);
+    state.me.hand = ["x", "c", "a", "t", "d", "o", "g", "y"];
+    state.me.groups = [
+      { tiles: "act", word: "cat" },
+      { tiles: "dgo", word: "dog" },
+    ];
+    view.apply({ matchId: "m-group", events: [], state, pending: null, result: null, matchFinished: false });
+    const oSlot = slotOfTile(view.looseSlots, "o");
+    const a = view.slots.get(`loose.${oSlot}@0`)!.place(0).position;
+    view.setHovered(view.pickables.find((t) => t.place.position.equals(a))!.id);
+    expect(view.dragStart(new Vector3(a.x, a.y, 4))).toBe(true);
+    view.dragMove(new Vector3(a.x + 9, a.y + 5, 4));
+    // mainLoop 拖动时每帧走的是 update()：它自己建 render 直接提交，不经 refreshFlags
+    view.update(performance.now());
+    expect(objectView.groupedObjects[0]).toHaveLength(3);
+    expect(objectView.groupedObjects[1]).toHaveLength(3);
+    view.dragEnd();
   });
 
   it("按住 A 整组拖到左边：和 moveGroupLoose 一致，成员格距不变", async () => {

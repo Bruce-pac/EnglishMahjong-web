@@ -25,8 +25,11 @@ export interface Render {
   temporary: boolean;
   /** 被压在别的牌下面，画暗一点 */
   bottom: boolean;
-  /** 属于某个暗词（T4.3）：交给第二个 OutlinePass 描暗词框。可省略，默认不是 */
-  grouped?: boolean;
+  /**
+   * 属于某个暗词（T4.3）时，它的框由哪个暗词描边通道画（P8，见 `group-pass.ts`）。
+   * 省略 = 不在暗词里
+   */
+  groupPass?: 0 | 1;
   /**
    * 吃牌时会用掉的牌（T6.1）：暖色 emissive 高亮，让玩家看清会用掉哪几张。
    * 故意不复用 selected——选中会触发框选校验。可省略，默认不是
@@ -66,8 +69,8 @@ export class ObjectView {
 
   /** 这一帧被选中的牌，交给 OutlinePass 描金边（T3.3） */
   readonly selectedObjects: Array<Mesh> = [];
-  /** 这一帧属于暗词的牌，交给第二个 OutlinePass 描暗词框（T4.3） */
-  readonly groupedObjects: Array<Mesh> = [];
+  /** 这一帧属于暗词的牌（T4.3），按两个暗词描边通道分开放（P8：相邻暗词分在不同通道，各描一个完整的框） */
+  readonly groupedObjects: [Array<Mesh>, Array<Mesh>] = [[], []];
 
   constructor(mainGroup: Group, assetLoader: AssetLoader) {
     this.mainGroup = mainGroup;
@@ -140,11 +143,12 @@ export class ObjectView {
   /** 每帧决定每张牌走 Simple 还是 Custom */
   updateThings(things: Array<Render>): void {
     this.selectedObjects.splice(0);
-    this.groupedObjects.splice(0);
+    this.groupedObjects[0].splice(0);
+    this.groupedObjects[1].splice(0);
     for (const thing of things) {
       // OutlinePass 描不了 InstancedMesh 里的某一个实例，所以暗词的牌也得走 Custom 轨
       const custom =
-        thing.hovered || thing.selected || thing.held || thing.bottom || !!thing.grouped || !!thing.highlighted;
+        thing.hovered || thing.selected || thing.held || thing.bottom || thing.groupPass !== undefined || !!thing.highlighted;
       if (!custom) {
         this.tileGroup.setSimple(thing.thingIndex, thing.place.position, thing.place.rotation);
         continue;
@@ -171,7 +175,7 @@ export class ObjectView {
       if (thing.highlighted) material.emissive.setRGB(0.3, 0.2, 0.0);
       if (thing.bottom) material.color.setRGB(0.8, 0.8, 0.8);
       if (thing.selected) this.selectedObjects.push(obj);
-      if (thing.grouped) this.groupedObjects.push(obj);
+      if (thing.groupPass !== undefined) this.groupedObjects[thing.groupPass].push(obj);
       if (thing.held) {
         // 抓在手里的牌永远浮在最上面，不被别的牌挡住
         material.transparent = true;

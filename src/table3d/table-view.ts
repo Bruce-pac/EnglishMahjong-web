@@ -47,6 +47,7 @@ import { assignThings } from "./thing-assign";
 import { layout, type DisplayState, type Placement } from "./placement";
 import * as persist from "./persist";
 import { syncWordLog, type WordEntry } from "./word-log";
+import { assignGroupPasses, type GroupPass } from "./group-pass";
 import { makeSlots } from "./setup-slots";
 import type { Slot } from "./slot";
 import { Thing } from "./thing";
@@ -833,6 +834,8 @@ export class TableView {
 
     const renders: Render[] = [];
     const loose = this.looseThings();
+    // 拖动中 A 层不变，分配也不变：框跟着牌走、不换通道
+    const passes = assignGroupPasses(this.loose);
     for (const thing of loose) {
       const place = thing.place();
       let pose: Place = place;
@@ -869,7 +872,7 @@ export class TableView {
           !(this.overRiver && this.riverOpen && this.heldGroup.length === 1),
         bottom: false,
         // 滑动过程中暗词框也得在，不然一拖就闪一下
-        grouped: this.entryOf(thing.index)?.groupId !== undefined,
+        groupPass: this.groupPassOf(thing.index, passes),
         highlighted: this.chiTiles.has(this.entryOf(thing.index)?.tileId ?? -1),
       });
     }
@@ -949,11 +952,12 @@ export class TableView {
 
   /** 把悬停 / 选中两个标志按当前状态写进上一批 Render */
   private refreshFlags(): void {
+    const passes = assignGroupPasses(this.loose);
     for (const r of this.renders) {
       r.hovered = r.thingIndex === this.hovered;
       const tileId = this.tileIdOf(r.thingIndex);
       r.selected = tileId !== null && this.selectedTiles.has(tileId);
-      r.grouped = this.entryOf(r.thingIndex)?.groupId !== undefined;
+      r.groupPass = this.groupPassOf(r.thingIndex, passes);
       r.highlighted = tileId !== null && this.chiTiles.has(tileId);
     }
   }
@@ -969,6 +973,12 @@ export class TableView {
     this.chiTiles = next;
     this.refreshFlags();
     this.objectView.updateThings(this.renders);
+  }
+
+  /** 这张牌所在暗词分到哪个描边通道（P8）。不在暗词里返回 undefined */
+  private groupPassOf(thingIndex: number, passes: ReadonlyMap<number, GroupPass>): GroupPass | undefined {
+    const gid = this.entryOf(thingIndex)?.groupId;
+    return gid === undefined ? undefined : passes.get(gid);
   }
 
   /** 这张牌（Thing 编号）在 LooseSlots 里的 entry。不在自己散牌区返回 null */

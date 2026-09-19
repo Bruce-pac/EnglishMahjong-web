@@ -25,7 +25,7 @@ import { WORLD_SIZE } from "./layout";
  */
 const RATIO = 1.5;
 
-/** 暗词框的颜色（T4.3）。选中是浅黄 0xffff99，暗词用青蓝，两者一眼分得开。待用户看截图定 */
+/** 暗词框的颜色（T4.3）。选中是浅黄 0xffff99，暗词用青蓝，两者一眼分得开。用户定（P9，2026-09-20） */
 const GROUP_EDGE_COLOR = 0x4fd1ff;
 
 /**
@@ -56,8 +56,11 @@ export class MainView {
   camera: Camera = null!;
   private composer: EffectComposer = null!;
   private outlinePass: OutlinePass = null!;
-  /** 暗词框（T4.3）。和选中的金边分开两个 pass，颜色才能一眼分得开 */
-  private groupOutlinePass: OutlinePass = null!;
+  /**
+   * 暗词框（T4.3）。和选中的金边分开 pass，颜色才能一眼分得开。
+   * 两个通道、同色：相邻暗词分在不同通道，才能各描一个完整的框（P8）
+   */
+  private groupOutlinePasses: [OutlinePass, OutlinePass] = [null!, null!];
 
   private perspective = false;
   private width = 0;
@@ -134,11 +137,15 @@ export class MainView {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
-    // 暗词框先画，选中的金边后画：两者叠在同一张牌上时金边在上面
-    this.groupOutlinePass = new OutlinePass(new Vector2(w, h), this.scene, this.camera);
-    this.groupOutlinePass.visibleEdgeColor.setHex(GROUP_EDGE_COLOR);
-    this.groupOutlinePass.hiddenEdgeColor.setHex(0x333333);
-    this.composer.addPass(this.groupOutlinePass);
+    // 暗词框先画，选中的金边后画：两者叠在同一张牌上时金边在上面。
+    // 两个暗词通道必须在这里跟金边一起建——切透视会整条重建后处理链
+    for (const i of [0, 1] as const) {
+      const pass = new OutlinePass(new Vector2(w, h), this.scene, this.camera);
+      pass.visibleEdgeColor.setHex(GROUP_EDGE_COLOR);
+      pass.hiddenEdgeColor.setHex(0x333333);
+      this.composer.addPass(pass);
+      this.groupOutlinePasses[i] = pass;
+    }
 
     this.outlinePass = new OutlinePass(new Vector2(w, h), this.scene, this.camera);
     // 金色描边：T4.3 的暗词组要靠它围金边（0xffff99）
@@ -154,10 +161,10 @@ export class MainView {
 
     // 逼 OutlinePass 现在就把 shader 编译掉，否则第一次选中牌会卡一下
     this.outlinePass.selectedObjects.push(this.dummyObject);
-    this.groupOutlinePass.selectedObjects.push(this.dummyObject);
+    for (const p of this.groupOutlinePasses) p.selectedObjects.push(this.dummyObject);
     this.composer.render();
     this.outlinePass.selectedObjects.pop();
-    this.groupOutlinePass.selectedObjects.pop();
+    for (const p of this.groupOutlinePasses) p.selectedObjects.pop();
 
     // 尺寸是在 updateViewport 里定的，这里重建之后要重新同步一次
     this.width = 0;
@@ -264,9 +271,10 @@ export class MainView {
     this.outlinePass.selectedObjects = selectedObjects;
   }
 
-  /** 暗词的牌（T4.3），描暗词框 */
-  updateGroupOutline(groupedObjects: Array<Object3D>): void {
-    this.groupOutlinePass.selectedObjects = groupedObjects;
+  /** 暗词的牌（T4.3），描暗词框。两个列表各交一个通道（P8） */
+  updateGroupOutline(groupedObjects: readonly [Array<Object3D>, Array<Object3D>]): void {
+    this.groupOutlinePasses[0].selectedObjects = groupedObjects[0];
+    this.groupOutlinePasses[1].selectedObjects = groupedObjects[1];
   }
 
   setPerspective(perspective: boolean): void {
