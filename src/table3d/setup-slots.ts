@@ -41,6 +41,20 @@ import { Size, ThingType } from "./types";
  *    那时散牌区横贯整条边，已不适用。）
  */
 
+/**
+ * 自己那排散牌的观感值（P6，用户 2026-09-20 看过 1.22 / 1.25 / 1.45 的截图后定）。
+ * 别家、牌河、牌墙、亮词区都不受影响。
+ * - 放大 1.22 倍：默认视角下牌宽只有约 33 像素、×N 只有几像素，看不清。
+ *   **1.22 是上限**：18 格乘 6 乘 1.22 正好 132，等于左右两家亮词区之间的空档；
+ *   再大就会在「满手牌挪到最左 / 最右、用上两端备用格」时盖住邻家亮出的词
+ *   （1.45 实测盖住上家的 CAT、DOG），也会撞破「四家之间不重叠」那条布局不变式
+ * - 后仰 60°：0° = 躺平，90° = 别家那种完全立起
+ */
+// 精确值是 1.21875：格子原点在 `Slot.rotate()` 里被量化到 1/16，
+// 6 × 1.21875 = 7.3125 正好是 1/16 的整数倍，格距和牌宽才严丝合缝（用 1.22 会差 0.0075，相邻两格判成重叠）
+export const HAND_SCALE = 1.21875;
+const HAND_LEAN = 60;
+
 const Rotation = {
   FACE_UP: new Quaternion().setFromEuler(new Euler(0, 0, 0)),
   FACE_DOWN: new Quaternion().setFromEuler(new Euler(Math.PI, 0, 0)),
@@ -53,6 +67,12 @@ const Rotation = {
    * 但槽位的地皮仍按平放的 6×9 留——别家胡牌/荒牌后 `concealed` 要摊开成平放。
    */
   STANDING: new Quaternion().setFromEuler(new Euler(Math.PI / 2, 0, 0)),
+  /**
+   * **后仰**：与 STANDING 同一个转轴（绕 x），只转 `HAND_LEAN`。
+   * 自己那排散牌用它——躺平的话牌面被俯视角度纵向压扁，字看着又小又扁；
+   * 后仰之后像立在牌架上。**别拿 STANDING 给自己用**：90° 从我们的俯视角度看只剩一条边
+   */
+  LEAN_BACK: new Quaternion().setFromEuler(new Euler((HAND_LEAN * Math.PI) / 180, 0, 0)),
 };
 
 /** 一排/一列的步长就是牌的尺寸——格子紧挨着，不留缝 */
@@ -164,9 +184,9 @@ function seats(which: number[] = [0, 1, 2, 3]): SlotOp {
   };
 }
 
-/** 一排 n 格居中时，最左那格的 origin.x */
-function centeredX(count: number): number {
-  return (WORLD_SIZE - count * DX) / 2;
+/** 一排 n 格居中时，最左那格的 origin.x。`dx` 不传就是一格一个牌宽 */
+function centeredX(count: number, dx: number = DX): number {
+  return (WORLD_SIZE - count * dx) / 2;
 }
 
 /** 中央空地的边长 = 牌河的宽度。见文件头约束 ① */
@@ -183,7 +203,7 @@ const CENTER_HOLE_EDGE = (WORLD_SIZE - CENTER_HOLE) / 2; // 90
  */
 const HAND_TO_WALL_GAP = 2 * DY; // 18
 /** 牌墙那条带子的近侧边 */
-const WALL_Y = DY + HAND_TO_WALL_GAP; // 27
+export const WALL_Y = DY + HAND_TO_WALL_GAP; // 27
 /** 亮词区的近侧边：紧贴散牌区背后，从右手边往里长 */
 const MELD_Y = DY; // 9
 /**
@@ -219,15 +239,19 @@ const START = {
    * （下标 2..15），画面对称，往两边都挤得动。初始手牌摆在哪几格由 `rebuildLoose`
    * 决定（它会居中铺），这里只负责让格子居中。
    */
-  loose: () =>
+  loose: (mine: boolean) =>
     new Slot({
       name: "loose",
       group: "loose",
-      origin: new Vector3(centeredX(LOOSE_SLOTS), 0, 0),
-      rotations: [Rotation.FACE_UP, Rotation.STANDING],
+      // 自己那排放大了（P6），格距和居中一起跟着放大
+      origin: new Vector3(centeredX(LOOSE_SLOTS, mine ? DX * HAND_SCALE : DX), 0, 0),
+      // 第 0 种姿态是「手牌怎么摆」：自己后仰、别家躺平（`placement.ts` 给手牌写的 rotationIndex 恒为 0）。
+      // 第 1 种是 STANDING，两边都保留——别家的手牌立着，自己的用不到但不去动它
+      rotations: [mine ? Rotation.LEAN_BACK : Rotation.FACE_UP, Rotation.STANDING],
       canFlipMultiple: true,
       drawShadow: true,
       rotateHeld: true,
+      tileScale: mine ? HAND_SCALE : 1,
     }),
 
   /**
@@ -292,7 +316,9 @@ const START = {
 /** 建出全部槽位，并把 shiftLeft / shiftRight 的名字换成引用 */
 export function makeSlots(): Map<string, Slot> {
   const groups: Array<Array<SlotOp>> = [
-    [start(START.loose()), row(LOOSE_SLOTS, DX, { shift: true }), seats()],
+    // 散牌区建两次：自己那排放大 + 后仰（P6），别家照旧。牌墙早就是这个写法
+    [start(START.loose(true)), row(LOOSE_SLOTS, DX * HAND_SCALE, { shift: true }), seats([0])],
+    [start(START.loose(false)), row(LOOSE_SLOTS, DX, { shift: true }), seats([1, 2, 3])],
     [start(START.meld()), column(MELD_ROWS), meldRows(), seats()],
     // 牌河：先按 −DY 往外铺 3 行（第 0 行贴桌心），每行再往 +x 铺 9 格
     [start(START.discard()), column(DISCARD_ROWS, -DY), row(DISCARD_COLS), seats()],

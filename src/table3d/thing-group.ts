@@ -20,6 +20,9 @@ export interface ThingParams {
   index: number;
 }
 
+/** 缩放差多少以内算「没动」（P6） */
+const SCALE_EPS = 0.001;
+
 /** 朝向差多少以内算「没动」。用来给 setSimple 提前返回 */
 const ROT_EPS = 0.05;
 function rotEquals(a: Quaternion, b: Quaternion): boolean {
@@ -246,15 +249,22 @@ if (vMapUv.x <= ${TILE_DU} && vMapUv.y <= ${TILE_DV}) {
     return m ? (m.geometry.attributes.uv.array as Float32Array) : null;
   }
 
-  setSimple(index: number, position: Vector3, rotation: Quaternion): void {
+  setSimple(index: number, position: Vector3, rotation: Quaternion, scale = 1): void {
     const i = index - this.startIndex;
     const mesh = this.meshes[i];
-    // 位置和朝向都没变就别再上传 instanceMatrix——大部分帧里大部分牌是不动的
-    if (!mesh.visible && mesh.position.equals(position) && rotEquals(mesh.quaternion, rotation)) {
+    // 位置、朝向、缩放都没变就别再上传 instanceMatrix——大部分帧里大部分牌是不动的。
+    // ⚠️ 缩放必须一起比：漏了它，第一帧之后放大就再也不更新（P6）
+    if (
+      !mesh.visible &&
+      mesh.position.equals(position) &&
+      rotEquals(mesh.quaternion, rotation) &&
+      Math.abs(mesh.scale.x - scale) < SCALE_EPS
+    ) {
       return;
     }
     mesh.position.copy(position);
     mesh.setRotationFromQuaternion(rotation);
+    mesh.scale.setScalar(scale);
     mesh.updateMatrix();
     mesh.visible = false;
     this.instancedMesh!.setMatrixAt(i, mesh.matrix);
@@ -278,11 +288,12 @@ if (vMapUv.x <= ${TILE_DU} && vMapUv.y <= ${TILE_DV}) {
     this.instancedMesh!.instanceMatrix.needsUpdate = true;
   }
 
-  setCustom(index: number, position: Vector3, rotation: Quaternion): Mesh {
+  setCustom(index: number, position: Vector3, rotation: Quaternion, scale = 1): Mesh {
     const i = index - this.startIndex;
     const mesh = this.meshes[i];
     mesh.position.copy(position);
     mesh.setRotationFromQuaternion(rotation);
+    mesh.scale.setScalar(scale);
     mesh.visible = true;
     this.instancedMesh!.setMatrixAt(i, this.zero);
     this.instancedMesh!.instanceMatrix.needsUpdate = true;

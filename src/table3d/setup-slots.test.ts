@@ -15,7 +15,7 @@ import {
   wallStacks,
   WORLD_SIZE,
 } from "./layout";
-import { makeSlots } from "./setup-slots";
+import { HAND_SCALE, makeSlots, WALL_Y } from "./setup-slots";
 import { Slot } from "./slot";
 import { Size, ThingType } from "./types";
 import { SEAT_ROTATIONS } from "./utils";
@@ -64,7 +64,9 @@ describe("座位旋转", () => {
         if (!name.endsWith(`@${seat}`)) continue;
         // 牌墙是唯一的例外：玩家侧 15 墩、别家 13 墩，长度不同也就没有共同的原型。
         // 别家三堵墙之间仍然是严格的旋转关系，拿座位 1 当基准比。
-        const baseSeat = slot.group === "wall" ? 1 : 0;
+        // 散牌区和牌墙都是「自己一份、别家一份」，玩家侧和别家没有共同的原型。
+        // 别家三份之间仍然是严格的旋转关系，拿座位 1 当基准比
+        const baseSeat = slot.group === "wall" || slot.group === "loose" ? 1 : 0;
         if (seat === baseSeat) continue;
         const base = slots.get(name.replace(/@\d+$/, `@${baseSeat}`))!;
         const expected = rotateAboutCenter(base.origin, seat - baseSeat);
@@ -156,17 +158,52 @@ describe("makePlace 的包围盒", () => {
 });
 
 describe("散牌区", () => {
-  it("两种朝向：自己平放正面朝上，别家立着（牌面朝他自己）", () => {
-    const slot = slots.get("loose.0@0")!;
+  it("别家：平放正面朝上 / 立着（牌面朝他自己）两种朝向", () => {
+    const slot = slots.get("loose.0@1")!;
     expect(slot.rotations.length).toBe(2);
-    // 平放：包围盒就是牌本身 6×9×4
-    expect(slot.places[0].size.y).toBeCloseTo(TILE.y);
+    // 平放：包围盒就是牌本身 6×9×4（别家不放大；座位 1 转了 90°，x 与 y 互换）
+    expect(slot.places[0].size.x).toBeCloseTo(TILE.y);
+    expect(slot.places[0].size.y).toBeCloseTo(TILE.x);
     expect(slot.places[0].size.z).toBeCloseTo(TILE.z);
     // 立着：y 与 z 互换，占地变浅、变高
-    expect(slot.places[1].size.y).toBeCloseTo(TILE.z);
     expect(slot.places[1].size.z).toBeCloseTo(TILE.y);
     // 立着的牌坐在桌面上，不悬空、不陷进桌子
     expect(slot.places[1].position.z).toBeCloseTo(TILE.y / 2);
+  });
+
+  // ---- P6：自己那排放大 + 后仰 ----
+  it("自己那排放大 HAND_SCALE 倍，别家三排没变", () => {
+    const mine = slots.get("loose.0@0")!;
+    expect(mine.tileScale).toBeCloseTo(HAND_SCALE);
+    expect(mine.places[0].scale).toBeCloseTo(HAND_SCALE);
+    expect(mine.places[0].size.x).toBeCloseTo(TILE.x * HAND_SCALE);
+    for (const seat of [1, 2, 3]) {
+      const other = slots.get(`loose.0@${seat}`)!;
+      expect(other.tileScale).toBe(1);
+      expect(other.places[0].scale).toBe(1);
+      expect(other.places[0].size.z).toBeCloseTo(TILE.z);
+    }
+  });
+
+  it("自己那排第 0 种姿态是后仰 60°（别家第 0 种仍是躺平），第 1 种仍是 STANDING", () => {
+    const lean = (slot: Slot) => {
+      // 绕 x 转了多少度：把牌面法线 +z 转过去，看它离 +z 偏了多少
+      const n = new Vector3(0, 0, 1).applyQuaternion(slot.rotations[0]);
+      return (Math.acos(Math.min(1, Math.abs(n.z))) * 180) / Math.PI;
+    };
+    expect(lean(slots.get("loose.0@0")!)).toBeCloseTo(60, 3);
+    expect(lean(slots.get("loose.0@1")!)).toBeCloseTo(0, 3);
+    // 第 1 种：立着，牌高 9 竖起来
+    expect(slots.get("loose.0@0")!.places[1].size.z).toBeCloseTo(TILE.y * HAND_SCALE);
+    expect(slots.get("loose.0@1")!.places[1].size.z).toBeCloseTo(TILE.y);
+  });
+
+  it("后仰之后这排没伸到牌墙那一排（牌墙 y 27 起）", () => {
+    for (const s of slots.values()) {
+      if (s.group !== "loose" || s.seat !== 0) continue;
+      const p = s.places[0];
+      expect(p.position.y + p.size.y / 2, s.name).toBeLessThanOrEqual(WALL_Y);
+    }
   });
 
   const loose0 = [...slots.values()]
@@ -211,9 +248,15 @@ describe("散牌区", () => {
     expect(n).toBe(LOOSE_SLOTS);
   });
 
-  it("相邻两格正好差一个牌宽，不重叠也不留缝", () => {
+  it("相邻两格正好差一个牌宽，不重叠也不留缝（自己那排是放大后的牌宽）", () => {
     for (let i = 1; i < loose0.length; i++) {
-      expect(loose0[i].origin.x - loose0[i - 1].origin.x).toBeCloseTo(TILE.x);
+      expect(loose0[i].origin.x - loose0[i - 1].origin.x).toBeCloseTo(TILE.x * HAND_SCALE);
+    }
+    const other = [...slots.values()]
+      .filter((s) => s.group === "loose" && s.seat === 1)
+      .sort((a, b) => a.indexes[0] - b.indexes[0]);
+    for (let i = 1; i < other.length; i++) {
+      expect(other[i].origin.y - other[i - 1].origin.y).toBeCloseTo(TILE.x);
     }
   });
 });
@@ -250,11 +293,12 @@ describe("亮词区", () => {
     expect(WORLD_SIZE - right).toBeLessThanOrEqual(TILE.x);
 
     // 也尽量贴近桌沿那一侧：首行紧挨着散牌区，再往角落挪就压上散牌区了
+    // 亮词区紧接着散牌区那条带。散牌区的格子 origin 在 y=0，带宽按一个牌高算——
+    // P6 之后自己那排后仰，实际地皮更浅（下面那条断言），但亮词区的位置不跟着变
     const firstRowNear = slots.get("meld.0.0@0")!.places[0];
+    expect(firstRowNear.position.y - firstRowNear.size.y / 2).toBeCloseTo(TILE.y);
     const hand = slots.get("loose.0@0")!.places[0];
-    expect(firstRowNear.position.y - firstRowNear.size.y / 2).toBeCloseTo(
-      hand.position.y + hand.size.y / 2,
-    );
+    expect(hand.position.y + hand.size.y / 2).toBeLessThanOrEqual(TILE.y + 1e-6);
 
     for (const s of slots.values()) {
       if (s.group !== "meld" || s.seat !== 0) continue;

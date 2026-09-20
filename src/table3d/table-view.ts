@@ -936,6 +936,8 @@ export class TableView {
       ...place,
       position: tw.from.position.clone().lerp(place.position, k),
       rotation: tw.from.rotation.clone().slerp(place.rotation, k),
+      // 自己那排散牌是放大的（P6）：飞到牌河 / 亮词区时尺寸也要一路变过去，不能在落点啪地一跳
+      scale: tw.from.scale + (place.scale - tw.from.scale) * k,
     };
     this.shown.set(thing.index, pose);
     return pose;

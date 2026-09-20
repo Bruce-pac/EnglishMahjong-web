@@ -73,6 +73,12 @@ export class Slot {
   /** 拖着单张牌悬停到这个格子上方时，是否把它转成本格子的朝向 */
   rotateHeld: boolean;
 
+  /**
+   * 这个格子里的牌画多大（P6）。自己那排散牌是 `HAND_SCALE`（1.21875），其余都是 1。
+   * **不要去改全局的 `Size[ThingType.TILE]`**——那会把四家、牌河、牌墙一起放大
+   */
+  tileScale: number;
+
   constructor(params: {
     name: string;
     group: string;
@@ -85,6 +91,7 @@ export class Slot {
     drawShadow?: boolean;
     shadowRotation?: number;
     rotateHeld?: boolean;
+    tileScale?: number;
   }) {
     this.name = params.name;
     this.group = params.group;
@@ -97,6 +104,7 @@ export class Slot {
     this.drawShadow = params.drawShadow ?? false;
     this.shadowRotation = params.shadowRotation ?? 0;
     this.rotateHeld = params.rotateHeld ?? false;
+    this.tileScale = params.tileScale ?? 1;
 
     this.places = this.rotations.map((rot) => this.makePlace(rot));
     this.links = {};
@@ -133,6 +141,7 @@ export class Slot {
       origin: this.origin,
       direction: this.direction,
       rotations: this.rotations,
+      tileScale: this.tileScale,
     });
     slot.linkDesc = linkDesc;
     slot.canFlipMultiple = this.canFlipMultiple;
@@ -179,7 +188,7 @@ export class Slot {
    * `origin` 是包围盒的角，`direction` 决定往哪一侧长。
    */
   makePlace(rotation: Quaternion): Place {
-    const dim = Size[this.type];
+    const dim = Size[this.type].clone().multiplyScalar(this.tileScale);
 
     const xv = new Vector3(0, 0, dim.z).applyQuaternion(rotation);
     const yv = new Vector3(0, dim.y, 0).applyQuaternion(rotation);
@@ -196,6 +205,7 @@ export class Slot {
       ),
       rotation,
       size: new Vector3(maxx, maxy, maxz),
+      scale: this.tileScale,
     };
   }
 

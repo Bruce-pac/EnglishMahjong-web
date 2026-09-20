@@ -155,7 +155,7 @@ export class ObjectView {
       const custom =
         thing.hovered || thing.selected || thing.held || thing.bottom || thing.groupPass !== undefined || !!thing.highlighted;
       if (!custom) {
-        this.tileGroup.setSimple(thing.thingIndex, thing.place.position, thing.place.rotation);
+        this.tileGroup.setSimple(thing.thingIndex, thing.place.position, thing.place.rotation, thing.place.scale);
         continue;
       }
 
@@ -163,6 +163,7 @@ export class ObjectView {
         thing.thingIndex,
         thing.place.position,
         thing.place.rotation,
+        thing.place.scale,
       );
       const material = obj.material as MeshLambertMaterial;
       const wasTransparent = material.transparent;

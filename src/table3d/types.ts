@@ -29,4 +29,9 @@ export interface Place {
   position: Vector3;
   rotation: Quaternion;
   size: Vector3;
+  /**
+   * 牌画多大（P6）。自己那排散牌放大到 `HAND_SCALE`（1.21875）倍，其余一律 1。
+   * `size` 已经是乘过它的包围盒，渲染那边还要拿它写进实例矩阵的缩放
+   */
+  scale: number;
 }
