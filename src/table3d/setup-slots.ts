@@ -248,8 +248,9 @@ const START = {
       group: "meld",
       origin: new Vector3(MELD_RIGHT, MELD_Y, 0),
       rotations: [Rotation.FACE_UP],
-      // 亮词区不接收拖放（亮词永久冻结），画影子纯粹是为了让人看清这块地在哪儿
-      drawShadow: true,
+      // **不画影子**（P7，用户 2026-09-20 定）：亮词区不接收拖放（亮词永久冻结），
+      // 当初画影子只是开发期为了量这块地的范围，开局四个角一片深绿、比牌还抢眼
+      drawShadow: false,
     }),
 
   /**

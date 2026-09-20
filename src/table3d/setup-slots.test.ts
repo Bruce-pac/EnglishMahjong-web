@@ -344,13 +344,15 @@ describe("牌墙", () => {
 });
 
 describe("槽位影子", () => {
-  it("四个区都画影子，且总数没顶到 ObjectView 的上限", () => {
+  it("散牌区 / 牌河 / 牌墙画影子，亮词区不画，且总数没顶到 ObjectView 的上限", () => {
     const withShadow = [...slots.values()].filter((s) => s.drawShadow);
-    for (const group of ["loose", "meld", "discard", "wall"]) {
+    for (const group of ["loose", "discard", "wall"]) {
       expect(withShadow.some((s) => s.group === group), group).toBe(true);
     }
+    // 亮词区不接收拖放，影子只会让开局四个角发暗（P7）
+    expect(withShadow.some((s) => s.group === "meld")).toBe(false);
     // object-view.ts 的 MAX_SHADOWS 是 512，算式写在那儿
-    expect(withShadow.length).toBe(72 + 152 + 112 + 54);
+    expect(withShadow.length).toBe(72 + 112 + 54);
     expect(withShadow.length).toBeLessThanOrEqual(512);
   });
 });
