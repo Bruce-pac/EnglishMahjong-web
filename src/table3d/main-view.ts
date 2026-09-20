@@ -148,8 +148,9 @@ export class MainView {
     }
 
     this.outlinePass = new OutlinePass(new Vector2(w, h), this.scene, this.camera);
-    // 金色描边：T4.3 的暗词组要靠它围金边（0xffff99）
-    this.outlinePass.visibleEdgeColor.setHex(0xffff99);
+    // 选中的金边。Autotable 用的是 0xffff99，我们换成更深一档的金（P5，用户 2026-09-20 定）：
+    // 同一道线性 → sRGB 让描边也偏淡，颜色加深比调 edgeStrength 好——后者会把边缘冲成白的
+    this.outlinePass.visibleEdgeColor.setHex(0xffd24a);
     this.outlinePass.hiddenEdgeColor.setHex(0x333333);
     this.composer.addPass(this.outlinePass);
 

@@ -56,8 +56,13 @@ const MAX_SHADOWS = 512;
  *
  * **不开 shadow map**：影子全是贴地的半透明黑色平面（研究笔记 §3.4）。
  * 桌面是平的，视觉损失几乎为零，却省掉整个 shadow pass。两套：
- * - 静态槽位影子：`drawShadow` 的格子画常驻淡影（opacity 0.1），告诉玩家「牌该放这」
- * - 落点影子：拖动时实时生成（opacity 0.2），跟着手走
+ * - 静态槽位影子：`drawShadow` 的格子画常驻淡影（opacity 0.21），告诉玩家「牌该放这」
+ * - 落点影子：拖动时实时生成（opacity 0.4），跟着手走
+ *
+ * **两个值都是 Autotable 的两倍**（它是 0.1 / 0.2），这不是抄错（P5）：
+ * 我们的后处理链末尾有 `OutputPass` 做线性 → sRGB，影子是在**线性空间**里混合完再转换的，
+ * 0.2 的黑只压暗 11%；Autotable 那版的 GammaCorrectionPass 是注释掉的，直接在 sRGB 里混合，
+ * 同样 0.2 压暗 20%。加倍之后两边观感一致（审查逐像素量过）。
  */
 export class ObjectView {
   readonly mainGroup: Group;
@@ -79,7 +84,7 @@ export class ObjectView {
     const plane = new PlaneGeometry(1, 1, 1);
     const shadowMaterial = new MeshBasicMaterial({
       transparent: true,
-      opacity: 0.1,
+      opacity: 0.21,
       color: 0,
       depthWrite: false,
     });
@@ -88,7 +93,7 @@ export class ObjectView {
     this.mainGroup.add(this.shadowObject);
 
     const dropMaterial = shadowMaterial.clone();
-    dropMaterial.opacity = 0.2;
+    dropMaterial.opacity = 0.4;
     this.dropShadowProto = new Mesh(plane, dropMaterial);
     this.dropShadowProto.name = "dropShadow";
   }
