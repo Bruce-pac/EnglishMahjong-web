@@ -324,12 +324,24 @@ describe("TableView 选中（T3.3）", () => {
     expect(new Set(after).size).toBe(after.length);
   });
 
-  it("拖动一张牌时清空选中", () => {
+  // P20 起：按住**选中的牌之一**是整批拖动，选中留到松手才清；按住没选中的才立刻清
+  it("拖动选中的牌之一：选中留着，松手才清空", () => {
     const { tableView } = setup();
     tableView.setSelected(tableView.pickables.map((t) => t.id));
     const t = tableView.pickables[0];
     tableView.setHovered(t.id);
     expect(tableView.dragStart(t.place.position.clone())).toBe(true);
+    expect(tableView.selectedTileIds().length).toBeGreaterThan(0);
+    tableView.cancelDrag();
+    expect(tableView.selectedTileIds()).toEqual([]);
+  });
+
+  it("拖动没选中的那张：立刻清空选中", () => {
+    const { tableView } = setup();
+    const [first, ...rest] = tableView.pickables;
+    tableView.setSelected(rest.map((t) => t.id));
+    tableView.setHovered(first.id);
+    expect(tableView.dragStart(first.place.position.clone())).toBe(true);
     expect(tableView.selectedTileIds()).toEqual([]);
     tableView.cancelDrag();
   });

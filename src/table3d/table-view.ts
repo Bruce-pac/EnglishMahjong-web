@@ -259,7 +259,7 @@ export class TableView {
           mouse: this.mouse!.clone(),
         };
         // 提交期间手上不拿着任何 Thing：commit 里顺带的 update() 不会把旧实例当成拿着的牌画
-        this.endDrag();
+        this.endDrag(true);
       }
     }
     this.lastEnv = env;
@@ -605,17 +605,30 @@ export class TableView {
   /** 在悬停的牌上按下 → 拿起。没指着牌返回 false */
   dragStart(mouse3: Vector3): boolean {
     if (this.locked || this.held || this.hovered === null) return false;
-    // 拖一张牌时先清空选中（整组拖动是 T4.3）
-    this.clearSelection();
     this.held = this.things[this.hovered]!;
-    // 按下的是暗词里的牌 → 整组一起拿起，成员之间的相对格距不变
+    // 按 Autotable 的三条分支决定拿起哪几张（P20）：
+    //   1. 按下的是暗词里的牌 → 整组一起（T4.3 的老行为）
+    //   2. 按下的是选中的牌之一 → 选中的那几张一起，**全程保留选中**（金边不掉）
+    //   3. 都不是 → 清空选中，只拿这一张
     const gid = this.entryOf(this.held.index)?.groupId;
-    this.heldGroup =
-      gid === undefined
-        ? [this.held]
-        : this.looseThings()
-            .filter((t) => this.entryOf(t.index)?.groupId === gid)
-            .sort((a, b) => a.slot.indexes[0] - b.slot.indexes[0]);
+    const heldTileId = this.entryOf(this.held.index)?.tileId;
+    if (gid !== undefined) {
+      this.clearSelection();
+      this.heldGroup = this.looseThings()
+        .filter((t) => this.entryOf(t.index)?.groupId === gid)
+        .sort((a, b) => a.slot.indexes[0] - b.slot.indexes[0]);
+    } else if (heldTileId !== undefined && this.selectedTiles.has(heldTileId)) {
+      // 选中的牌拼不拼得成单词都能拖（用户定）。多张的挪法与暗词整组一样，走 moveGroupLoose
+      this.heldGroup = this.looseThings()
+        .filter((t) => {
+          const id = this.entryOf(t.index)?.tileId;
+          return id !== undefined && this.selectedTiles.has(id);
+        })
+        .sort((a, b) => a.slot.indexes[0] - b.slot.indexes[0]);
+    } else {
+      this.clearSelection();
+      this.heldGroup = [this.held];
+    }
     this.setHovered(null);
     this.heldMouse = mouse3.clone();
     this.mouse = mouse3.clone();
@@ -737,8 +750,8 @@ export class TableView {
     return null;
   }
 
-  /** 手上拿着的牌的 tileId，锚点（按下的那张）在最前。没在拖返回空数组 */
-  private heldTileIds(): number[] {
+  /** 手上拿着的牌的 tileId，锚点（按下的那张）在最前。没在拖返回空数组（测试也读它） */
+  heldTileIds(): number[] {
     if (!this.held) return [];
     const order = [this.held, ...this.heldGroup.filter((t) => t !== this.held)];
     return order.flatMap((t) => {
@@ -807,7 +820,15 @@ export class TableView {
       : insertLoose(this.loose, from, to);
   }
 
-  private endDrag(): void {
+  /**
+   * 收尾。**落下就清空选中**（P20：合法 / 非法 / 取消三条路都经过这里，
+   * 「单击选中的牌」天然是「按下没动就松手」，也在这里被清掉）。
+   *
+   * `keepSelection` 只给 `apply` 的那一处用：回放打断拖动、随后 `resumeDrag` 把牌接回来，
+   * 那不是玩家松手，选中不能掉
+   */
+  private endDrag(keepSelection = false): void {
+    if (!keepSelection) this.clearSelection();
     this.held = null;
     this.heldGroup = [];
     this.heldMouse = null;
@@ -862,7 +883,8 @@ export class TableView {
       renders.push({
         thingIndex: thing.index,
         place: pose,
-        selected: false,
+        // P20：框选后整批拖动时选中状态要留着，金边全程在
+        selected: this.selectedTiles.has(this.entryOf(thing.index)?.tileId ?? -1),
         hovered: false,
         held,
         // 压在牌河上且能打：不算非法落点，不画半透明
