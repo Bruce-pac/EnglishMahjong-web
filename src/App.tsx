@@ -87,14 +87,12 @@ function showcaseWords(words: string[]): string[] {
 function Landing({
   onStart,
   onRules,
-  onTable3D,
   account,
   onAccount,
   identityRev,
 }: {
   onStart: () => void;
   onRules: () => void;
-  onTable3D: () => void;
   account: AccountState | null;
   onAccount: () => void;
   identityRev: number;
@@ -299,11 +297,6 @@ function Landing({
       </div>
 
       <div className="landing-footer">
-        {/* 3D 牌桌还在开发中，入口先放这儿——2.5D 页仍是主路径（D1 并存期） */}
-        <button className="footer-link" onClick={onTable3D}>
-          🀄 试试 3D 牌桌（开发中）
-        </button>
-        <span className="footer-dot">·</span>
         <a
           className="footer-link"
           href="https://github.com/Bruce-pac/EnglishMahjong-web"
@@ -354,9 +347,26 @@ function Switch({
 }
 
 /** 游戏设置页。默认值＝发明者的原规则，一个字没改。 */
-function Setup({ onStart, onBack }: { onStart: (c: MatchConfig) => void; onBack: () => void }) {
+/**
+ * 点「开始游戏」之后去哪个页面（T7.1）。抽成纯函数是为了能单测——
+ * 设置页里的点击本身没法测，vitest 跑在 node 环境、没有 DOM
+ */
+export function viewForStart(table: TableStyle): "table3d" | "classic" {
+  return table === "3d" ? "table3d" : "classic";
+}
+
+export function Setup({
+  onStart,
+  onBack,
+}: {
+  onStart: (c: MatchConfig, table: TableStyle) => void;
+  onBack: () => void;
+}) {
   const [c, setC] = useState<MatchConfig>(DEFAULTS);
   const set = (k: keyof MatchConfig, v: unknown) => setC({ ...c, [k]: v });
+  // T7.1：牌桌样式。**不是 MatchConfig 的一部分**——服务端不认识它，不进开局请求。
+  // 默认 3D，**故意不持久化**（用户 2026-09-22 定）：每次进设置页都从 3D 开始
+  const [table, setTable] = useState<TableStyle>("3d");
 
   return (
     <div className="setup-page">
@@ -368,6 +378,19 @@ function Setup({ onStart, onBack }: { onStart: (c: MatchConfig) => void; onBack:
       </div>
 
       <div className="setup-card">
+        <div className="setup-group">
+          <div className="setup-group-label">牌桌样式</div>
+          <Seg
+            options={[
+              ["3d", "3D 牌桌"],
+              ["classic", "经典"],
+            ]}
+            value={table}
+            onChange={(v) => setTable(v as TableStyle)}
+          />
+          <p className="setup-group-hint">3D 是立体牌桌，可以拖着牌重排；经典是平面版。只影响这一局，不记住。</p>
+        </div>
+
         <div className="setup-group">
           <div className="setup-group-label">词库</div>
           <Seg options={TIERS as [string, string][]} value={c.tier} onChange={(v) => set("tier", v)} />
@@ -445,7 +468,7 @@ function Setup({ onStart, onBack }: { onStart: (c: MatchConfig) => void; onBack:
           onChange={(v) => set("hints", v)}
         />
 
-        <button className="btn btn-primary btn-cta" onClick={() => onStart(c)}>
+        <button className="btn btn-primary btn-cta" onClick={() => onStart(c, table)}>
           ▶ 开始游戏
         </button>
       </div>
@@ -453,9 +476,17 @@ function Setup({ onStart, onBack }: { onStart: (c: MatchConfig) => void; onBack:
   );
 }
 
+/** T7.1：设置页里选的牌桌样式。只在前端分叉用，不进 MatchConfig */
+type TableStyle = "3d" | "classic";
+
 export default function App() {
   const g = useGame();
   const [config, setConfig] = useState<MatchConfig | null>(null);
+  /**
+   * T7.1：在设置页选了 3D 时带过去的那份配置。`null` = 不是从设置页进来的
+   * （`?view=3d` 直接打开、或带 `?match=` 刷新回来），那时 3D 页用它自己的默认配置
+   */
+  const [config3d, setConfig3d] = useState<MatchConfig | null>(null);
   // `?view=3d` 是 3D 页自己写进地址栏的（table3d/Table3D.tsx）：它和 2.5D 页共用
   // `?match=<id>`，没有这个标记的话，带牌局刷新会被下面的恢复逻辑拉回 2.5D 页
   const [view, setView] = useState<"landing" | "setup" | "rules" | "table3d">(() =>
@@ -588,7 +619,6 @@ export default function App() {
           <Landing
             onStart={() => setView("setup")}
             onRules={() => setView("rules")}
-            onTable3D={() => setView("table3d")}
             account={account}
             onAccount={openAccount}
             identityRev={identityRev}
@@ -607,6 +637,7 @@ export default function App() {
         <>
           <Suspense fallback={<div className="table3d-page" />}>
             <Table3D
+              config={config3d}
               onBack={() => {
                 // 3D 页往地址栏写了 ?match&view=3d，走的时候要擦掉——
                 // 不擦的话回首页刷新又会被弹回 3D 页
@@ -628,7 +659,13 @@ export default function App() {
     return (
       <Setup
         onBack={() => setView("landing")}
-        onStart={(c) => {
+        onStart={(c, table) => {
+          if (viewForStart(table) === "table3d") {
+            // 3D 页自己调 api 开局（总纲 §0 第 5 条：3D 不走 useGame），配置从这里传过去
+            setConfig3d(c);
+            setView("table3d");
+            return;
+          }
           setConfig(c);
           g.newMatch(c);
         }}

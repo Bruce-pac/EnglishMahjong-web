@@ -60,7 +60,9 @@ function claimKindOf(p: Pending | null): "chi" | "win" | null {
  * 新开的局用的配置。地址栏带 `?hints=1` 时打开提示（T6.2）——**只影响新开的局**：
  * 已有的局以服务端的 `state.config.hints` 为准，刷新回来也一样
  */
-function configForNewMatch(): MatchConfig {
+export function configForNewMatch(fromSetup: MatchConfig | null): MatchConfig {
+  // T7.1：从设置页选「3D 牌桌」进来的，用玩家在那儿选的那份
+  if (fromSetup) return fromSetup;
   const hints = new URLSearchParams(window.location.search).get("hints") === "1";
   return { ...DEFAULT_CONFIG, hints };
 }
@@ -129,12 +131,20 @@ function modalOpen(): boolean {
 }
 
 export function Table3D({
+  config: configFromSetup = null,
   onBack,
   account = null,
   onAccount,
   onProfile,
   onLeaderboard,
-}: { onBack: () => void } & Table3DAccountProps) {
+}: {
+  /**
+   * T7.1：设置页选了 3D 时带过来的那份配置。只用在**开新局**那一下；
+   * 带 `?match=` 时仍然是接管原来那局，配置以服务端下发的 `state.config` 为准
+   */
+  config?: MatchConfig | null;
+  onBack: () => void;
+} & Table3DAccountProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   /** 框选的选框。DOM 覆盖层而不是 3D 对象（研究笔记 §4.3：恒定面向屏幕的 UI 一律用 DOM） */
   const selectionRef = useRef<HTMLDivElement>(null);
@@ -1113,7 +1123,7 @@ export function Table3D({
       const loadMatch = async () => {
         setFailure(null);
         try {
-          const env = await openMatch(readMatchId(), configForNewMatch(), {
+          const env = await openMatch(readMatchId(), configForNewMatch(configFromSetup), {
             resume: api.resume,
             newMatch: api.newMatch,
             clearSave: persist.clear,

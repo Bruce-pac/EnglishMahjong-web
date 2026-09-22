@@ -32,6 +32,8 @@ page.on("response", async (r) => {
 await page.goto(process.env.BASE ?? "http://localhost:5173");
 // 首页只是门面，配置在第二步的设置页里
 await page.click(".landing button:has-text('开始游戏')");
+// T7.1：设置页的牌桌样式默认是 3D，这个脚本跑的是 2.5D，必须先显式选「经典」
+await page.click(".seg-btn:has-text('经典')");
 await page.click(".seg-btn:has-text('≥6')"); // 起胡门槛 ≥6，否则牌局太快
 await page.click(".setup-card button:has-text('开始游戏')");
 await page.waitForTimeout(1200);
