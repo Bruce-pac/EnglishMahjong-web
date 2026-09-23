@@ -28,6 +28,11 @@ import { wallChain } from "./placement";
  * 300ms 时补间几乎占满整步，桌上一直有牌在动，看不清发生了什么
  */
 export const REPLAY_STEP_MS = 600;
+/**
+ * P21 发牌动画：每一轮之间隔多久。4 轮约 1 秒，补间 180ms 在下一轮开始前落地。
+ * 发完到开局第一个事件之间停一个 REPLAY_STEP_MS。用户看过录像后可能再调
+ */
+export const DEAL_STEP_MS = 250;
 
 /**
  * P1：这个事件落地时响什么。照 2.5D 那张表（`useGame.ts` 的 `SOUND_FOR`）再加上荒牌：

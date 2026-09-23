@@ -20,7 +20,8 @@ import * as persist from "./persist";
 import { Settlement } from "./Settlement";
 import { spellSelection } from "./spell";
 import { gameIndexOf, TableView, TWEEN_TIME } from "./table-view";
-import { dwellOf, pinnedFor, SAY_MS, sayOf, soundOf, stepState } from "./replay";
+import { DEAL_STEP_MS, dwellOf, pinnedFor, REPLAY_STEP_MS, SAY_MS, sayOf, soundOf, stepState } from "./replay";
+import { dealSteps, dealtState, startStep } from "./deal";
 import { Animation } from "./utils";
 import { winMarkers, type WinMarker } from "./win-marker";
 import { actorOf, boardModel, nextReplayActor } from "./board-model";
@@ -605,13 +606,25 @@ export function Table3D({
     const soundTimers = new Set<number>();
     const playAfterTween = (e: Parameters<typeof soundOf>[0]) => {
       const name = soundOf(e);
-      if (!name) return;
+      if (name) soundAfterTween(name);
+    };
+    const soundAfterTween = (name: Parameters<typeof play>[0]) => {
       const t = window.setTimeout(() => {
         soundTimers.delete(t);
         if (alive) play(name);
       }, TWEEN_TIME);
       soundTimers.add(t);
     };
+    /** P21：发牌动画的等待。卸载时一起清掉，离开牌桌后不再有牌飞 */
+    const dealTimers = new Set<number>();
+    const dealWait = (ms: number) =>
+      new Promise<void>((f) => {
+        const t = window.setTimeout(() => {
+          dealTimers.delete(t);
+          f();
+        }, ms);
+        dealTimers.add(t);
+      });
     let bubbleKey = 0;
     const say = (seat: number, text: string) => {
       window.clearTimeout(bubbleTimers.get(seat));
@@ -709,6 +722,39 @@ export function Table3D({
       shownGame = game;
     };
 
+    /**
+     * P21：真的发了一局新牌时（开新场、[下一局]）先演一遍发牌：满墙空手起步，分 4 轮四家同时抓，
+     * 每轮牌落地时响一声 deal。发完把「刚发完的局面」设成回放的出发点，接下来 applyEnvelope
+     * 会照常回放开局以来的事件（AI 当庄时它的开局动作）。发牌期间锁整排，不只锁提交
+     */
+    const playDeal = async (env: Envelope) => {
+      if (!tableView) return;
+      tableView.setLocked(true);
+      pending = null;
+      refreshControls();
+      const at = (state: State) => ({ ...env, state, pending: null, result: null });
+      const start = startStep(env);
+      tableView.applyDeal(env, start);
+      board.update(boardModel(at(start.state), actorOf(at(start.state), null)));
+      const { steps, nextTileId } = dealSteps(env, tableView.nextTileIdSeed);
+      for (let i = 0; i < steps.length; i++) {
+        await dealWait(i === 0 ? TWEEN_TIME : DEAL_STEP_MS);
+        if (!alive) return;
+        const last = i === steps.length - 1;
+        tableView.applyDeal(env, steps[i], last ? { nextTileId } : undefined);
+        board.update(boardModel(at(steps[i].state), actorOf(at(steps[i].state), null)));
+        setWordLog(tableView.wordLog);
+        // 最后一轮不响（用户 2026-09-23 定）：一声 deal 本身约 0.5 秒，前三轮叠成一阵发牌声，
+        // 第四轮若也响，牌全落地之后声音还要拖 0.5 秒
+        if (!last) soundAfterTween("deal");
+      }
+      await dealWait(REPLAY_STEP_MS);
+      if (!alive) return;
+      tableView.setLocked(false);
+      shownState = dealtState(env);
+      shownGame = `${env.matchId}|${gameIndexOf(env)}`;
+    };
+
     /** 吃进 envelope。带 events 的先回放（T5.1），再按真 envelope 刷新界面 */
     const applyEnvelope = async (env: Envelope, consumedTileIds: readonly number[] = []) => {
       await replayEvents(env, consumedTileIds);
@@ -779,7 +825,7 @@ export function Table3D({
     const submit = async (
       call: (id: string) => Promise<Envelope>,
       consumedTileIds: readonly number[] = [],
-      beforeApply?: () => void,
+      beforeApply?: (env: Envelope) => void | Promise<void>,
     ): Promise<boolean> => {
       if (!matchId || busy) return false;
       busy = true;
@@ -787,7 +833,8 @@ export function Table3D({
       try {
         const env = await call(matchId);
         if (!alive) return false;
-        beforeApply?.();
+        await beforeApply?.(env);
+        if (!alive) return false;
         // 回放期间 busy 一直是真的：提交锁到回放结束
         await applyEnvelope(env, consumedTileIds);
         return true;
@@ -951,13 +998,19 @@ export function Table3D({
       void submit(
         (id) => api.nextGame(id),
         [],
-        () => {
+        async (env) => {
+          // 结算面板要在发牌开始前收起：它原本只在 applyEnvelope 末尾按 env.result 刷新，
+          // 而那要等发牌 + 开局回放全部演完，面板会一直盖在发牌动画上面
+          setSettle(null);
+          // 「第 N 胡」标记同理：上一局的，不能挂在新一局的发牌上面
+          marks = [];
+          setWinMarks([]);
           tableView?.resetGame();
           setWordLog([]);
-          play("deal"); // 真的发了一局新牌
           shownState = null; // 新一局的 events 从空桌开始，不接上一局的画面
           closeChi();
           closeWildPicker();
+          await playDeal(env); // 真的发了一局新牌：先演发牌，再回放开局事件
         },
       );
     };
@@ -1156,8 +1209,9 @@ export function Table3D({
           });
           if (!alive) return;
           writeMatchId(env.matchId);
+          if (dealt) await playDeal(env); // 真开了新场才演发牌；接管原局、刷新恢复直接跳到最终局面
+          if (!alive) return;
           await applyEnvelope(env);
-          if (dealt && alive) play("deal");
         } catch (e) {
           if (alive) setFailure({ message: describeFailure(e), retry: () => void loadMatch() });
         }
@@ -1183,6 +1237,8 @@ export function Table3D({
       window.clearTimeout(noticeTimer);
       for (const t of bubbleTimers.values()) window.clearTimeout(t);
       for (const t of soundTimers) window.clearTimeout(t);
+      for (const t of dealTimers) window.clearTimeout(t);
+      dealTimers.clear();
       soundTimers.clear();
       cancelAnimationFrame(raf);
       mount.removeEventListener("mousemove", onMouseMove);

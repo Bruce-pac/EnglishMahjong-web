@@ -31,6 +31,17 @@ const { replayDiff } = await import("../src/table3d/replay.ts");
 const { gameIndexOf } = await import("../src/table3d/table-view.ts");
 const { dealerOf } = await import("../src/table3d/board-model.ts");
 let dealerChecked = 0;
+// P21：开局发牌动画的出发点「刚发完的局面」必须满足推演不变式——服务端改了发牌数、
+// 或者 dealtState 扣自己摸牌算错了，这里当场报。每一局的开局都验（包括 AI 当庄的）
+const { dealtState, WALL_AFTER_DEAL } = await import("../src/table3d/deal.ts");
+let openingChecked = 0;
+function checkOpening(env, where) {
+  const bad = replayDiff(dealtState(env), env.events, env.state);
+  if (bad) fail(`开局推演：${where} ${bad}\n  events=${JSON.stringify(env.events)}`);
+  const wall = dealtState(env).wallLeft;
+  if (wall !== WALL_AFTER_DEAL) fail(`开局推演：${where} 发完的牌墙 ${wall}，应为 ${WALL_AFTER_DEAL}`);
+  openingChecked++;
+}
 function checkDealer(env, where) {
   const first = env.events.find((e) => e.t === "draw");
   if (!first) fail(`庄家推论：${where} 开局 envelope 里没有 draw 事件`);
@@ -135,6 +146,7 @@ for (let round = 0; games < GAMES; round++) {
   });
   const matchId = env.matchId;
   checkDealer(env, `场${round}第 1 局`);
+  checkOpening(env, `场${round}第 1 局`);
 
   let r = m.rebuildLoose(env.state.me, 1);
   let lastSlotName = new Map();
@@ -189,6 +201,7 @@ for (let round = 0; games < GAMES; round++) {
       if (env.matchFinished || games >= GAMES) break;
       env = await api(`/api/matches/${matchId}/games`, { method: "POST" });
       checkDealer(env, `场${round}第 ${gameIndexOf(env) + 1} 局`);
+      checkOpening(env, `场${round}第 ${gameIndexOf(env) + 1} 局`);
       // 换局是 A 层最该被考验的时刻：整手牌全换，上一局的存档必须整体作废
       r = m.rebuildLoose(env.state.me, r.nextTileId);
       lastSlotName = new Map();
@@ -217,3 +230,4 @@ for (let round = 0; games < GAMES; round++) {
 console.log(`✓ ${games} 局 / ${steps} 步，五条不变式全部成立；推演不变式验了 ${replayed} 步`);
 console.log(`  推演过的事件：${JSON.stringify(eventKinds)}`);
 console.log(`  庄家推论（开局第一个 draw 的座位 = dealerOf）核对了 ${dealerChecked} 局`);
+console.log(`  开局推演（刚发完的局面 + events ≡ envelope）验了 ${openingChecked} 局`);

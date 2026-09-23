@@ -47,6 +47,7 @@ import { assignThings } from "./thing-assign";
 import { layout, type DisplayState, type Placement } from "./placement";
 import * as persist from "./persist";
 import { syncWordLog, type WordEntry } from "./word-log";
+import type { DealStep } from "./deal";
 import { assignGroupPasses, type GroupPass } from "./group-pass";
 import { makeSlots } from "./setup-slots";
 import type { Slot } from "./slot";
@@ -306,6 +307,35 @@ export class TableView {
     this.words = syncWordLog(this.words, env.state, env.events);
     this.saveAndCommit(pinned, true);
     if (carry) this.resumeDrag(carry);
+  }
+
+  /**
+   * 开局发牌的一轮（P21）。**不走对账**：自己的散牌区直接用 `deal.ts` 算好的「露出前 n 张」，
+   * 这样发完之后与 `rebuildLoose` 逐格相同。中间几轮不写存档；给了 `done`（最后一轮）才写，
+   * 同时把 nextTileId 推到发完之后的值——接下来回放开局事件时照常走 `apply` 的对账
+   */
+  applyDeal(env: Envelope, step: DealStep, done?: { nextTileId: number }): void {
+    this.cancelDrag();
+    const stepEnv: Envelope = { ...env, state: step.state, pending: null, result: null };
+    this.lastEnv = stepEnv;
+    this.mySeat = step.state.me.seat;
+    if (this.matchId !== env.matchId || gameIndexOf(env) !== this.gameIndex) {
+      // 发牌只发生在新场 / 新一局：上一局的一切都作废，这里不读存档（新局本来就没有）
+      if (this.matchId === env.matchId) this.resetGame();
+      this.matchId = env.matchId;
+      this.lastSlotName.clear();
+      this.shown.clear();
+      this.tweens.clear();
+      this.words = [];
+      this.gameIndex = gameIndexOf(env);
+    }
+    this.loose = step.loose;
+    if (done) {
+      this.nextTileId = done.nextTileId;
+      this.saveAndCommit(step.pinned, true);
+    } else {
+      this.commit(layout(stepEnv.state, this.loose, this.display), step.pinned, true);
+    }
   }
 
   /** 存档 + B 层摊开 + 提交。envelope 进来和本地拖放落下都走这里 */
@@ -1142,6 +1172,11 @@ export class TableView {
   /** 测试用：读回某个 Thing 已提交的牌面编号（大小写切换钉着它） */
   faceOfThing(thingIndex: number): number {
     return this.committed[thingIndex];
+  }
+
+  /** 下一张新牌会发到的 tileId（P21 发牌时要从这里接着编号，tileId 永不回收） */
+  get nextTileIdSeed(): number {
+    return this.nextTileId;
   }
 
   /** P18 本局词条，最早的在前 */
