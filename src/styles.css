@@ -2470,11 +2470,15 @@ button.footer-link {
   color: var(--gold);
 }
 .table3d-prefs-note {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   max-width: 180px;
   color: #8fb8a4;
   font-size: 11px;
   line-height: 1.4;
+}
+/* 说明贴着它上面那一行；下一项开关和它拉开距离，读得出说明归哪一行（P1） */
+.table3d-prefs-note + .table3d-prefs-row {
+  margin-top: 12px;
 }
 
 /* 右上角 ⚙ 左边的一排：从右往左是 👤、📜。👤 已登录时显示名字、宽度不定，

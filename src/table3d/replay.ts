@@ -17,6 +17,8 @@
  */
 
 import type { GameEvent, State } from "../api";
+// 只导入类型：编译后会被擦掉，不会把 sound.ts（模块顶层读全局 localStorage）拉进测试
+import type { SoundName } from "../sound";
 import { DISCARD_COLS } from "./layout";
 import { wallChain } from "./placement";
 
@@ -26,6 +28,24 @@ import { wallChain } from "./placement";
  * 300ms 时补间几乎占满整步，桌上一直有牌在动，看不清发生了什么
  */
 export const REPLAY_STEP_MS = 600;
+
+/**
+ * P1：这个事件落地时响什么。照 2.5D 那张表（`useGame.ts` 的 `SOUND_FOR`）再加上荒牌：
+ * 打牌、吃、亮词、胡四家都响，荒牌响一声；**摸牌不响**（用户定）。
+ * 吃牌是 chi → reveal → discard 三连，照 2.5D 响三声，不去合并
+ */
+export function soundOf(e: GameEvent): SoundName | null {
+  switch (e.t) {
+    case "discard":
+    case "chi":
+    case "reveal":
+    case "win":
+    case "exhausted":
+      return e.t;
+    default:
+      return null;
+  }
+}
 /** 吃、亮词、胡这三种要停久一点：头上有气泡，词要读得完 */
 export const REPLAY_SAY_STEP_MS = 1200;
 /** 气泡停留多久（不含 0.3s 淡出）。同 Mahjong 项目的 say-ui */

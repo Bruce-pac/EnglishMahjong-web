@@ -30,7 +30,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 const render = (open: boolean, lowercase: boolean) =>
   renderToStaticMarkup(
-    <PrefsPanel open={open} lowercase={lowercase} onToggleOpen={() => {}} onLowercase={() => {}} />,
+    <PrefsPanel open={open} lowercase={lowercase} soundOn onToggleOpen={() => {}} onLowercase={() => {}} onSound={() => {}} />,
   );
 
 describe("⚙ 面板", () => {

@@ -19,8 +19,8 @@ import { openMatch } from "./open-match";
 import * as persist from "./persist";
 import { Settlement } from "./Settlement";
 import { spellSelection } from "./spell";
-import { gameIndexOf, TableView } from "./table-view";
-import { dwellOf, pinnedFor, SAY_MS, sayOf, stepState } from "./replay";
+import { gameIndexOf, TableView, TWEEN_TIME } from "./table-view";
+import { dwellOf, pinnedFor, SAY_MS, sayOf, soundOf, stepState } from "./replay";
 import { Animation } from "./utils";
 import { winMarkers, type WinMarker } from "./win-marker";
 import { actorOf, boardModel, nextReplayActor } from "./board-model";
@@ -28,6 +28,8 @@ import { CenterBoard } from "./center-board";
 import { CharacterLayer } from "./characters";
 import { ConfigBar } from "./ConfigBar";
 import { PrefsPanel } from "./PrefsPanel";
+// P1 音效：只许在这个文件里 import sound.ts（它在模块顶层读全局 localStorage，被测模块一引就崩）
+import { isMuted, play, setMuted } from "../sound";
 import { WordLogPanel } from "./WordLogPanel";
 import type { WordEntry } from "./word-log";
 import { readHandCase, writeHandCase } from "./hand-case";
@@ -218,6 +220,11 @@ export function Table3D({
   // ---- T2.3b 偏好 ----
   /** ⚙ 面板开着没有。点图标、点面板外、按 Esc 都能收 */
   const [prefsOpen, setPrefsOpen] = useState(false);
+  /**
+   * 音效开着没有（P1）。直接读写 sound.ts 的开关，**不挂在资源加载完成之后**——
+   * 大小写开关挂在 caseRef 上、加载完成前点了会静默失效，别学它
+   */
+  const [soundOn, setSoundOn] = useState(() => !isMuted());
   // ---- P18 本局词条 ----
   /** 📜 面板开着没有。和 ⚙ 互斥，收起的时机同 ⚙ */
   const [logOpen, setLogOpen] = useState(false);
@@ -594,6 +601,17 @@ export function Table3D({
     let replayingFlag = false;
     // 气泡：同一家新气泡顶掉旧的；停 SAY_MS 后淡出 0.3s 再撤掉（同 Mahjong 项目的 say-ui）
     const bubbleTimers = new Map<number, number>();
+    // P1：排好的音效。牌落地（补间结束）那一刻才响，卸载时一起清掉，离开牌桌后不再出声
+    const soundTimers = new Set<number>();
+    const playAfterTween = (e: Parameters<typeof soundOf>[0]) => {
+      const name = soundOf(e);
+      if (!name) return;
+      const t = window.setTimeout(() => {
+        soundTimers.delete(t);
+        if (alive) play(name);
+      }, TWEEN_TIME);
+      soundTimers.add(t);
+    };
     let bubbleKey = 0;
     const say = (seat: number, text: string) => {
       window.clearTimeout(bubbleTimers.get(seat));
@@ -658,6 +676,8 @@ export function Table3D({
               pinnedFor(s, e, at >= 0 ? `loose.${at}@${s.me.seat}` : undefined),
             );
             if (own) consumed = [];
+            // 自己的动作也在这里响：3D 里自己的牌同样是等回包、在回放里飞过去的
+            playAfterTween(e);
             setWordLog(tableView!.wordLog);
             s = next;
             replayActor = nextReplayActor(replayActor, e);
@@ -934,6 +954,7 @@ export function Table3D({
         () => {
           tableView?.resetGame();
           setWordLog([]);
+          play("deal"); // 真的发了一局新牌
           shownState = null; // 新一局的 events 从空桌开始，不接上一局的画面
           closeChi();
           closeWildPicker();
@@ -1123,14 +1144,20 @@ export function Table3D({
       const loadMatch = async () => {
         setFailure(null);
         try {
+          // 发牌声只在真的开了新场时响（包括 404 / 403 后自动重开）；接管原局、刷新恢复不响
+          let dealt = false;
           const env = await openMatch(readMatchId(), configForNewMatch(configFromSetup), {
             resume: api.resume,
-            newMatch: api.newMatch,
+            newMatch: (c) => {
+              dealt = true;
+              return api.newMatch(c);
+            },
             clearSave: persist.clear,
           });
           if (!alive) return;
           writeMatchId(env.matchId);
           await applyEnvelope(env);
+          if (dealt && alive) play("deal");
         } catch (e) {
           if (alive) setFailure({ message: describeFailure(e), retry: () => void loadMatch() });
         }
@@ -1155,6 +1182,8 @@ export function Table3D({
       validator.dispose();
       window.clearTimeout(noticeTimer);
       for (const t of bubbleTimers.values()) window.clearTimeout(t);
+      for (const t of soundTimers) window.clearTimeout(t);
+      soundTimers.clear();
       cancelAnimationFrame(raf);
       mount.removeEventListener("mousemove", onMouseMove);
       mount.removeEventListener("mouseleave", onMouseLeave);
@@ -1290,6 +1319,11 @@ export function Table3D({
           setLogOpen(false);
         }}
         onLowercase={(lower) => caseRef.current?.(lower)}
+        soundOn={soundOn}
+        onSound={(on) => {
+          setMuted(!on);
+          setSoundOn(on);
+        }}
       />
       <button className="table3d-back" onClick={onBack}>
         ← 返回
