@@ -1936,6 +1936,22 @@ button.footer-link {
   to { opacity: 0; }
 }
 
+/* P4 桌沿名牌：贴在各家那一侧木框顶面中点，只在正交显示。样式照效果图 mock-B。
+   不叫 .overlay（T6.6 快捷键靠它判断弹窗）；不接点击 */
+.table3d-nameplate {
+  position: fixed;
+  visibility: hidden;
+  padding: 1px 8px;
+  border: 1px solid #b08850;
+  border-radius: 4px;
+  background: #e9dcc0;
+  color: #4a2f14;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}
 /* T6.5：已胡各家座位旁的「第 N 胡」，每帧按投影定位 */
 .table3d-win-mark {
   position: fixed;

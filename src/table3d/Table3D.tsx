@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { BoxGeometry, Group, Mesh, MeshLambertMaterial, PlaneGeometry, Vector2, Vector3 } from "three";
-import { Size, ThingType } from "./types";
 import { api, ApiError, type AccountState, type Envelope, type MatchConfig, type Pending, type Result, type State } from "../api";
 import { AssetLoader } from "./asset-loader";
 import { WILD_CANDIDATES } from "./atlas";
@@ -32,6 +31,7 @@ import { PrefsPanel } from "./PrefsPanel";
 // P1 音效：只许在这个文件里 import sound.ts（它在模块顶层读全局 localStorage，被测模块一引就崩）
 import { isMuted, play, setMuted } from "../sound";
 import { WordLogPanel } from "./WordLogPanel";
+import { nameplates, RIM_HEIGHT, RIM_WIDTH, TABLE_SIZE, type Nameplate } from "./nameplate";
 import type { WordEntry } from "./word-log";
 import { readHandCase, writeHandCase } from "./hand-case";
 
@@ -256,6 +256,9 @@ export function Table3D({
   /** 已胡各家的「第 N 胡」。文字由 React 渲染，位置每帧直接改 DOM（同 [拆开]） */
   const [winMarks, setWinMarks] = useState<WinMarker[]>([]);
   const markerEls = useRef(new Map<number, HTMLDivElement>());
+  /** P4 桌沿名牌：只在正交显示。自己的座位定了才知道三块各在哪一侧 */
+  const [plates, setPlates] = useState<Nameplate[]>([]);
+  const plateEls = useRef(new Map<number, HTMLDivElement>());
   /** 回放时各家头上的气泡（「亮 WINDOW」「吃 Z」「胡」）。文字由 React 渲染，位置每帧直接改 DOM */
   const [bubbles, setBubbles] = useState<Record<number, { text: string; out: boolean; key: number }>>({});
   const bubbleEls = useRef(new Map<number, HTMLDivElement>());
@@ -282,7 +285,7 @@ export function Table3D({
     //
     // WORLD_SIZE 是 222，不是 Autotable 的 174——我们每家要摆的东西多得多
     // （18 格散牌区、14 格亮词行、15 墩牌墙），见 layout.ts 的推导。
-    const tableSize = WORLD_SIZE + Size[ThingType.TILE].y;
+    const tableSize = TABLE_SIZE; // 名牌的锚点（nameplate.ts）用的同一个数
     const tableGeometry = new PlaneGeometry(tableSize, tableSize);
     const tableMaterial = new MeshLambertMaterial({ color: 0x1d6b4a });
     const table = new Mesh(tableGeometry, tableMaterial);
@@ -295,8 +298,8 @@ export function Table3D({
     // P16 木框：四根边条贴着桌面外缘围一圈。上下两根长出 2T 盖住四角，左右两根夹在中间。
     // 底面在 z = −0.5，顶面 z = H − 0.5。不进 Thing 池，mouse-ui 只拾取自己的代理体，拾不到它
     {
-      const T = 7;
-      const H = 3;
+      const T = RIM_WIDTH;
+      const H = RIM_HEIGHT;
       const c = WORLD_SIZE / 2;
       const side = new MeshLambertMaterial({ color: 0x6b4226 });
       const top = new MeshLambertMaterial({ color: 0x8a5a36 });
@@ -569,6 +572,9 @@ export function Table3D({
     let hintsOnFlag = false;
     /** 「第 N 胡」标记（mainLoop 每帧按它投影） */
     let marks: WinMarker[] = [];
+    /** P4 桌沿名牌（每帧投影用这份，React 那份只管渲染 DOM） */
+    let platesNow: Nameplate[] = [];
+    let platesSeat: number | null = null;
     let noticeTimer = 0;
 
     const showNotice = (message: string, tone: "error" | "info" = "error") => {
@@ -712,6 +718,11 @@ export function Table3D({
       tableView!.apply(env, consumed);
       setWordLog(tableView!.wordLog);
       setMySeatUi(env.state.me.seat);
+      if (platesSeat !== env.state.me.seat) {
+        platesSeat = env.state.me.seat;
+        platesNow = nameplates(platesSeat);
+        setPlates(platesNow);
+      }
       // 最后一步已经对齐真值，解开提交锁；控件随后由 applyEnvelope 按真 envelope 刷新
       tableView!.setSubmitLocked(false);
       if (replayingFlag) {
@@ -1149,6 +1160,21 @@ export function Table3D({
           el.style.top = `${cy}px`;
           el.style.visibility = "visible";
         }
+        // P4 桌沿名牌：正交才显示（透视靠 3D 角色认人）。锚点是那一侧木框顶面中点，
+        // 所以按 z / x 缩放、空格低头时跟着木框走，出屏就出屏
+        for (const n of platesNow) {
+          const el = plateEls.current.get(n.seat);
+          if (!el) continue;
+          if (view.isPerspective) {
+            el.style.visibility = "hidden";
+            continue;
+          }
+          const p = mouseUi.project(n.anchor, view.camera);
+          const rect = view.canvas.getBoundingClientRect();
+          el.style.left = `${rect.left + ((p.x + 1) / 2) * rect.width}px`;
+          el.style.top = `${rect.top + ((1 - p.y) / 2) * rect.height}px`;
+          el.style.visibility = "visible";
+        }
         // 「第 N 胡」跟着座位走：锚点是该家散牌区那一排的中点上方
         for (const m of marks) {
           const el = markerEls.current.get(m.seat);
@@ -1310,6 +1336,20 @@ export function Table3D({
           ))}
         </div>
       )}
+      {plates.map((n) => (
+        // P4 桌沿名牌：先平移居中再转，旋转绕自身中心，不和居中打架
+        <div
+          key={n.seat}
+          className="table3d-nameplate"
+          style={{ transform: `translate(-50%, -50%) rotate(${n.angle}deg)` }}
+          ref={(el) => {
+            if (el) plateEls.current.set(n.seat, el);
+            else plateEls.current.delete(n.seat);
+          }}
+        >
+          {n.label}
+        </div>
+      ))}
       {winMarks.map((m) => (
         <div
           key={m.seat}

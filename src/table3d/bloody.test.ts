@@ -10,6 +10,7 @@ import { layout } from "./placement";
 import { makeSlots } from "./setup-slots";
 import { TableView } from "./table-view";
 import { fixtureGames } from "./test-helpers";
+import { AI_NAMES } from "./names";
 import { winMarkers } from "./win-marker";
 
 type Other = State["others"][number];
@@ -68,6 +69,7 @@ describe("别家摊开的暗词之间空一格", () => {
 });
 
 describe("「第 N 胡」标记", () => {
+  // P4 起 AI 的标记前面带名字（「Jean · 第 2 胡」），自己的仍只有「第 N 胡」
   it("只给 won 的家，文字是 winOrder + 1", () => {
     const s = stateWith(
       [{ won: true, winOrder: 1 }, { won: false, winOrder: null }, { won: true, winOrder: 2 }],
@@ -75,8 +77,8 @@ describe("「第 N 胡」标记", () => {
     );
     expect(winMarkers(s)).toEqual([
       { seat: s.me.seat, label: "第 1 胡" },
-      { seat: s.others[0].seat, label: "第 2 胡" },
-      { seat: s.others[2].seat, label: "第 3 胡" },
+      { seat: s.others[0].seat, label: `${AI_NAMES[s.others[0].seat]} · 第 2 胡` },
+      { seat: s.others[2].seat, label: `${AI_NAMES[s.others[2].seat]} · 第 3 胡` },
     ]);
   });
 
