@@ -21,6 +21,13 @@ export interface PickTarget {
   place: Place;
 }
 
+/** P22 悬停区：别家亮词区的牌、别家摊开的正面牌。只读，不参与拖动 / 框选 */
+export interface HoverTarget {
+  seat: number;
+  kind: "meld" | "concealed";
+  place: Place;
+}
+
 /**
  * T3.1：鼠标拾取（研究笔记 §4.1、§4.2，照 Autotable 的 `mouse-ui.ts`）。
  *
@@ -97,6 +104,33 @@ export class MouseUi {
       obj.userData.id = id;
     }
   }
+
+  /**
+   * P22：光标下是哪一家的亮词 / 摊开的暗词。和 `pick()` 用**同一套反投影**（`setRay`），
+   * 但不动代理体池——自己散牌区那套拾取一行不改。取离相机最近的那一格
+   */
+  hoverHit(mouse2: Vector2, camera: Camera, targets: readonly HoverTarget[]): { seat: number; kind: "meld" | "concealed" } | null {
+    if (targets.length === 0) return null;
+    this.setRay(mouse2, camera);
+    const ray = this.raycaster.ray;
+    let best: HoverTarget | null = null;
+    let bestDist = Infinity;
+    for (const t of targets) {
+      const half = t.place.size.clone().multiplyScalar(0.5);
+      this.hoverBox.set(t.place.position.clone().sub(half), t.place.position.clone().add(half));
+      this.hoverBox.applyMatrix4(this.mainGroup.matrixWorld);
+      const p = ray.intersectBox(this.hoverBox, this.hoverPoint);
+      if (!p) continue;
+      const d = p.distanceTo(ray.origin);
+      if (d < bestDist) {
+        bestDist = d;
+        best = t;
+      }
+    }
+    return best ? { seat: best.seat, kind: best.kind } : null;
+  }
+  private readonly hoverBox = new Box3();
+  private readonly hoverPoint = new Vector3();
 
   /** 鼠标（归一化 -1..1）指着哪张牌。没指着可拾取的牌返回 null */
   pick(mouse2: Vector2, camera: Camera): number | null {

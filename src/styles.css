@@ -1936,6 +1936,51 @@ button.footer-link {
   to { opacity: 0; }
 }
 
+/* P22 悬停别家亮词 / 摊开的暗词时的释义浮层。样式照效果图 mock-A；
+   不叫 .overlay（T6.6 快捷键靠它判断弹窗）；不接点击，跟着光标走 */
+.table3d-hovercard {
+  position: fixed;
+  visibility: hidden;
+  z-index: 12;
+  /* 按内容定宽、封顶 340px。不写 max-content 的话，靠右边缘时 fixed 元素会被挤窄去塞剩下的空间，
+     量出来的宽度「刚好放得下」，翻边判断就失灵了 */
+  width: max-content;
+  max-width: 340px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(18, 24, 20, 0.94);
+  color: #e8f2ec;
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+.table3d-hovercard h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffe08a;
+}
+.table3d-hovercard .sec {
+  margin: 0 0 3px;
+  font-size: 11px;
+  color: #9fb8ab;
+}
+.table3d-hovercard .row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+.table3d-hovercard .w {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.table3d-hovercard .d {
+  color: #d6e4dc;
+}
+
 /* P4 桌沿名牌：贴在各家那一侧木框顶面中点，只在正交显示。样式照效果图 mock-B。
    不叫 .overlay（T6.6 快捷键靠它判断弹窗）；不接点击 */
 .table3d-nameplate {

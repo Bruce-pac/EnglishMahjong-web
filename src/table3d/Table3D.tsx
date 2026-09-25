@@ -32,6 +32,7 @@ import { PrefsPanel } from "./PrefsPanel";
 import { isMuted, play, setMuted } from "../sound";
 import { WordLogPanel } from "./WordLogPanel";
 import { nameplates, RIM_HEIGHT, RIM_WIDTH, TABLE_SIZE, type Nameplate } from "./nameplate";
+import { DefinitionCache, hoverCard, type Definition, type HoverCard } from "./hover-card";
 import type { WordEntry } from "./word-log";
 import { readHandCase, writeHandCase } from "./hand-case";
 
@@ -131,6 +132,20 @@ export interface Table3DAccountProps {
 /** App 的全屏弹窗（`.overlay`）开着：键盘快捷键别漏到牌桌上 */
 function modalOpen(): boolean {
   return document.querySelector(".overlay") !== null;
+}
+
+/** P22：浮层里一行释义的文字 */
+function definitionText(d: Definition): string {
+  switch (d.status) {
+    case "found":
+      return d.text;
+    case "missing":
+      return "（词表里没有释义）";
+    case "error":
+      return "（释义没取到）";
+    default:
+      return "释义加载中…";
+  }
 }
 
 /**
@@ -278,6 +293,14 @@ export function Table3D({
   const [plates, setPlates] = useState<Nameplate[]>([]);
   const plateEls = useRef(new Map<number, HTMLDivElement>());
   /** 回放时各家头上的气泡（「亮 WINDOW」「吃 Z」「胡」）。文字由 React 渲染，位置每帧直接改 DOM */
+  // ---- P22 悬停别家亮词 / 摊开的暗词：浮层列出词和释义 ----
+  const [hover, setHover] = useState<HoverCard | null>(null);
+  const hoverElRef = useRef<HTMLDivElement>(null);
+  /** 释义回来了就 +1，逼浮层重画 */
+  const [, setDefRev] = useState(0);
+  /** 整个 3D 页共用一份，换局不清（组件卸载才丢） */
+  const defCache = useRef<DefinitionCache | null>(null);
+  if (!defCache.current) defCache.current = new DefinitionCache(api.define, () => setDefRev((r) => r + 1));
   const [bubbles, setBubbles] = useState<Record<number, { text: string; out: boolean; key: number }>>({});
   const bubbleEls = useRef(new Map<number, HTMLDivElement>());
   const actionsRef = useRef<{
@@ -359,7 +382,12 @@ export function Table3D({
     /** 已按下的键。按住不放时浏览器会重复触发 keydown，用它去重 */
     const keys = new Set<string>();
 
+    /** 光标的屏幕坐标：悬停浮层跟着它走 */
+    let clientX = 0;
+    let clientY = 0;
     const onMouseMove = (e: MouseEvent) => {
+      clientX = e.clientX;
+      clientY = e.clientY;
       const rect = view.canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
       mouse2.set(
@@ -1108,6 +1136,38 @@ export function Table3D({
 
     // 自建 mainLoop：每帧推进动画、对齐画布、摆相机、拾取、渲染
     let raf = 0;
+    /**
+     * P22 悬停浮层：拖动中、框选中、弹窗开着、光标在自己的牌上时不出；离开悬停区立刻收起。
+     * 内容只在「指着的那家那一片、或它的词」变了时才重算，位置每帧跟着光标
+     */
+    let hoverKey = "";
+    const updateHoverCard = () => {
+      if (!tableView || !mouseUi) return;
+      const off =
+        !hasMouse || selectStart3 !== null || tableView.dragging || modalOpen() || tableView.hoveredThing !== null;
+      const hit = off ? null : mouseUi.hoverHit(mouse2, view.camera, tableView.hoverTargets);
+      const state = tableView.currentState;
+      const card = hit && state ? hoverCard(state, hit) : null;
+      const key = card ? `${hit!.seat}:${hit!.kind}:${card.title}:${card.words.join(",")}` : "";
+      if (key !== hoverKey) {
+        hoverKey = key;
+        setHover(card);
+        // 只在真的悬停到时才查，不预取
+        if (card) for (const w of card.words) defCache.current?.request(w);
+      }
+      const el = hoverElRef.current;
+      if (!card || !el) return;
+      // 出现在光标右下；靠右 / 靠下边缘时翻到另一侧，不出屏
+      const gap = 16;
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const x = clientX + gap + w > window.innerWidth ? Math.max(4, clientX - gap - w) : clientX + gap;
+      const y = clientY + gap + h > window.innerHeight ? Math.max(4, clientY - gap - h) : clientY + gap;
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+      el.style.visibility = "visible";
+    };
+
     const mainLoop = () => {
       raf = requestAnimationFrame(mainLoop);
       lookDown.update();
@@ -1129,6 +1189,7 @@ export function Table3D({
           tableView.setHovered(hasMouse ? mouseUi.pick(mouse2, view.camera) : null);
         }
         tableView.update(performance.now());
+        updateHoverCard();
         // 框选拖动过程中不校验（每帧都在变，逐帧发请求会刷爆服务端），松手后才算选定
         if (!selectStart3) {
           validator.update(spellSelection(tableView.looseSlots, tableView.selectedTileIds()));
@@ -1357,6 +1418,19 @@ export function Table3D({
             >
               {c.toUpperCase()}
             </button>
+          ))}
+        </div>
+      )}
+      {hover && (
+        // P22：别家亮词 / 摊开的暗词 + 释义。只列服务端已下发的公开的词，不列「还能拼什么」
+        <div className="table3d-hovercard" ref={hoverElRef} role="tooltip">
+          <h4>{hover.title}</h4>
+          <div className="sec">{hover.subtitle}</div>
+          {hover.words.map((w, i) => (
+            <div className="row" key={`${i}-${w}`}>
+              <span className="w">{w.toUpperCase()}</span>
+              <span className="d">{definitionText(defCache.current!.get(w))}</span>
+            </div>
           ))}
         </div>
       )}

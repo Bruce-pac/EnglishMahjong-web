@@ -50,7 +50,7 @@ export interface DisplayState {
 }
 
 /** 散牌区的两种朝向：0 = 平放正面朝上，1 = 立着（牌面朝那一家自己） */
-const LOOSE_FACE_UP = 0;
+export const LOOSE_FACE_UP = 0;
 /**
  * 别家没亮出来的手牌**立在自己面前**，牌面朝他本人、牌背朝桌心——
  * 真牌桌就是这样，我们只看得见背面。平着扣在桌上的是打出去的牌，不是手牌。

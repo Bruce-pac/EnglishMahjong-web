@@ -39,12 +39,12 @@ import {
   type LooseEntry,
   type LooseSlots,
 } from "./loose-reconcile";
-import type { PickTarget } from "./mouse-ui";
+import type { HoverTarget, PickTarget } from "./mouse-ui";
 import type { DiscardIntent } from "./discard";
 import { findSlot, Movement } from "./movement";
 import type { ObjectView, Render } from "./object-view";
 import { assignThings } from "./thing-assign";
-import { layout, type DisplayState, type Placement } from "./placement";
+import { layout, LOOSE_FACE_UP, type DisplayState, type Placement } from "./placement";
 import * as persist from "./persist";
 import { syncWordLog, type WordEntry } from "./word-log";
 import type { DealStep } from "./deal";
@@ -135,6 +135,9 @@ export class TableView {
   private gameIndex: number | null = null;
   /** 自己的座位号。只有这家散牌区的牌能拾取 */
   private mySeat = 0;
+
+  /** P22 悬停区（别家亮词 / 摊开的正面牌） */
+  private hoverTargetsNow: HoverTarget[] = [];
 
   /** 上一次提交给 ObjectView 的整批 Render。悬停变了就改个标志原样再交一次 */
   private renders: Render[] = [];
@@ -409,6 +412,7 @@ export class TableView {
 
     const renders: Render[] = [];
     const pickTargets: PickTarget[] = [];
+    const hoverTargets: HoverTarget[] = [];
     const nextSlotName = new Map<number, string>();
     const placed = new Set<number>();
 
@@ -443,6 +447,13 @@ export class TableView {
       }
       if (!this.tweens.has(index)) this.shown.set(index, place);
       if (slot.group === "loose" && slot.seat === this.mySeat) pickTargets.push({ id: index, place });
+      // P22 悬停区：只有别家的、正面朝上的——亮词区，以及散牌区里被 concealed 覆盖摊开的牌。
+      // **背面牌一律不进**（它们本来就没有字，也绝不能有），自己的也不进
+      if (slot.seat !== null && slot.seat !== this.mySeat) {
+        if (slot.group === "meld") hoverTargets.push({ seat: slot.seat, kind: "meld", place });
+        else if (slot.group === "loose" && p.rotationIndex === LOOSE_FACE_UP)
+          hoverTargets.push({ seat: slot.seat, kind: "concealed", place });
+      }
       renders.push({
         thingIndex: index,
         place,
@@ -463,6 +474,7 @@ export class TableView {
     for (const id of this.selectedTiles) if (!live.has(id)) this.selectedTiles.delete(id);
     this.renders = renders;
     this.pickTargets = pickTargets;
+    this.hoverTargetsNow = hoverTargets;
     this.refreshFlags();
 
     this.objectView.updateThings(renders);
@@ -980,6 +992,11 @@ export class TableView {
     return this.tweens.size > 0;
   }
 
+  /** P22：别家亮词、别家摊开的正面牌，悬停出释义浮层用。只读 */
+  get hoverTargets(): readonly HoverTarget[] {
+    return this.hoverTargetsNow;
+  }
+
   /** 这一帧可拾取的牌（自己散牌区，含暗词）。`MouseUi` 每帧把它写进代理体 */
   get pickables(): readonly PickTarget[] {
     return this.locked ? [] : this.pickTargets;
@@ -1155,6 +1172,11 @@ export class TableView {
   /** 选中的 tileId，**按槽位从左到右**。T4.1 按这个顺序拼单词 */
   selectedTileIds(): number[] {
     return this.loose.flatMap((e) => (e && this.selectedTiles.has(e.tileId) ? [e.tileId] : []));
+  }
+
+  /** P22：当前画着的局面（悬停浮层从它算内容）。还没上过桌返回 null */
+  get currentState(): Envelope["state"] | null {
+    return this.lastEnv?.state ?? null;
   }
 
   get hoveredThing(): number | null {
