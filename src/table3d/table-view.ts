@@ -148,10 +148,12 @@ export class TableView {
    */
   private selectedTiles = new Set<number>();
   /**
-   * 单击选中的暗词（T4.3），按 `groupKey` 记——`groupId` 每帧重算，key 才跨帧稳定。
-   * 暗词被拆开后对账会清掉 key，这里自然就找不到了（[拆开] 按钮随之消失）
+   * 单击选中的暗词（T4.3），**记的是点中的那张牌的 tileId**，成员是「当前和它同一个 `groupId` 的牌」。
+   * 不能按 `groupKey` 记（P12）：两个完全相同的暗词（如两组 AT）key 一样，按 key 找成员会把两组的牌一起交给
+   * [拆开]，服务端找不到这样的暗词、回 400。`groupId` 每帧重算，但同一帧里区分得开两组；
+   * 暗词被拆开后对账会清掉那张牌的 `groupId`，这里自然就找不到了（[拆开] 按钮随之消失）
    */
-  private focusedKey: string | null = null;
+  private focusedTileId: number | null = null;
   /** 吃牌时会用掉的牌（T6.1），按 tileId 记。只是高亮，不是选中 */
   private chiTiles = new Set<number>();
 
@@ -501,7 +503,7 @@ export class TableView {
     if (locked === this.locked) return;
     if (locked) {
       this.cancelDrag();
-      this.focusedKey = null;
+      this.focusedTileId = null;
       this.setSelected([]);
       this.setHovered(null);
     }
@@ -1082,6 +1084,21 @@ export class TableView {
   }
 
   /**
+   * 拆开暗词成功后、对账之前（P12）：把拆开的那几张的 `groupKey` 摘掉。
+   * 两个完全相同的暗词，服务端只知道「少了一组」、不知道是哪一组；不先摘掉的话，对账按「带本组 key 的最左边」
+   * 挑牌，可能把剩下那组配到刚拆开的牌上——画面上像是另一组被拆了
+   */
+  unmarkGroup(tileIds: readonly number[]): void {
+    const ids = new Set(tileIds);
+    this.loose = this.loose.map((e) => {
+      if (!e || !ids.has(e.tileId) || !e.groupKey) return e;
+      const next = { ...e };
+      delete next.groupKey;
+      return next;
+    });
+  }
+
+  /**
    * 组暗词成功后收拢（T4.3）：成员向左连成一块。和 `markGroup` 一样在对账之前调用，
    * 于是只有一次提交。成员之间夹着别的牌时 `compactGroup` 返回 null，就不收拢
    */
@@ -1090,7 +1107,7 @@ export class TableView {
   }
 
   clearSelection(): void {
-    this.focusedKey = null;
+    this.focusedTileId = null;
     this.setSelected([]);
   }
 
@@ -1102,15 +1119,15 @@ export class TableView {
    * 暗词本身的框一直在，不需要再描金边。点的不是暗词里的牌返回 false，什么都不改
    */
   focusGroupAt(thingIndex: number): boolean {
-    const key = this.locked ? undefined : this.entryOf(thingIndex)?.groupKey;
-    if (!key || this.entryOf(thingIndex)?.groupId === undefined) return false;
+    const e = this.locked ? undefined : this.entryOf(thingIndex);
+    if (!e || e.groupId === undefined) return false;
     this.setSelected([]);
-    this.focusedKey = key;
+    this.focusedTileId = e.tileId;
     return true;
   }
 
   clearFocusedGroup(): void {
-    this.focusedKey = null;
+    this.focusedTileId = null;
   }
 
   /**
@@ -1118,21 +1135,21 @@ export class TableView {
    * 以及 [拆开] 按钮的锚点——最右边那张牌顶面的上方，`mainGroup` 局部坐标，
    * 调用方每帧用 `mouseUi.project` 投到屏幕，镜头动了按钮跟着走。没有聚焦的暗词返回 null
    */
-  focusedGroupInfo(): { tiles: string; anchor: Vector3 } | null {
-    if (this.focusedKey === null) return null;
+  focusedGroupInfo(): { tiles: string; tileIds: number[]; anchor: Vector3 } | null {
+    if (this.focusedTileId === null) return null;
+    const gid = this.loose.find((e) => e?.tileId === this.focusedTileId)?.groupId;
+    if (gid === undefined) return null;
     const members = this.looseThings()
-      .filter((t) => {
-        const e = this.entryOf(t.index);
-        return e?.groupKey === this.focusedKey && e.groupId !== undefined;
-      })
+      .filter((t) => this.entryOf(t.index)?.groupId === gid)
       .sort((a, b) => a.slot.indexes[0] - b.slot.indexes[0]);
     if (members.length === 0) return null;
     const tiles = members.map((t) => this.entryOf(t.index)!.tile).join("");
+    const tileIds = members.map((t) => this.entryOf(t.index)!.tileId);
     const place = members[members.length - 1].place();
     const anchor = place.position.clone();
     anchor.z += place.size.z / 2;
     anchor.y += place.size.y / 2;
-    return { tiles, anchor };
+    return { tiles, tileIds, anchor };
   }
 
   /** 选中的 tileId，**按槽位从左到右**。T4.1 按这个顺序拼单词 */
@@ -1155,7 +1172,7 @@ export class TableView {
     this.words = [];
     this.lastSlotName.clear();
     this.selectedTiles.clear();
-    this.focusedKey = null;
+    this.focusedTileId = null;
     this.chiTiles.clear();
     this.hovered = null;
     this.slides.clear();

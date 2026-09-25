@@ -321,6 +321,70 @@ describe("TableView 单击暗词（[拆开] 的状态）", () => {
   });
 });
 
+describe("两个完全相同的暗词（P12）", () => {
+  it("单击其中一组：[拆开] 只交这一组的牌，另一组不受影响", async () => {
+    const { Group } = await import("three");
+    const { ObjectView } = await import("./object-view");
+    const { TableView } = await import("./table-view");
+    const { fakeAssetLoader } = await import("./fake-assets");
+    const { fixtureGames } = await import("./test-helpers");
+    const view = new TableView(new ObjectView(new Group(), fakeAssetLoader()), makeSlots());
+    const state = structuredClone(fixtureGames()[0].steps[2].state);
+    state.me.hand = ["a", "t", "a", "t", "x"];
+    state.me.groups = [
+      { tiles: "at", word: "at" },
+      { tiles: "at", word: "at" },
+    ];
+    view.apply({ matchId: "m-p12", events: [], state, pending: null, result: null, matchFinished: false });
+    // 两组各两张、key 相同，groupId 不同
+    const grouped = view.looseSlots.filter((e) => e?.groupId !== undefined);
+    expect(grouped).toHaveLength(4);
+    expect(new Set(grouped.map((e) => e!.groupKey)).size).toBe(1);
+    const thingAt = (slot: number) => {
+      const p = view.slots.get(`loose.${slot}@0`)!.place(0).position;
+      return view.pickables.find((t) => t.place.position.equals(p))!.id;
+    };
+    for (const e of grouped) {
+      const slot = view.looseSlots.indexOf(e);
+      expect(view.focusGroupAt(thingAt(slot))).toBe(true);
+      const info = view.focusedGroupInfo()!;
+      expect(info.tiles).toHaveLength(2); // 修之前是 4：两组的牌一起交，服务端回 400
+      expect([...info.tiles].sort().join("")).toBe("at");
+    }
+  });
+
+  it("拆开其中一组后，剩下的那组仍是没点的那一组（先摘 key 再对账）", async () => {
+    const { Group } = await import("three");
+    const { ObjectView } = await import("./object-view");
+    const { TableView } = await import("./table-view");
+    const { fakeAssetLoader } = await import("./fake-assets");
+    const { fixtureGames } = await import("./test-helpers");
+    const view = new TableView(new ObjectView(new Group(), fakeAssetLoader()), makeSlots());
+    const state = structuredClone(fixtureGames()[0].steps[2].state);
+    state.me.hand = ["a", "t", "a", "t", "x"];
+    const two = [
+      { tiles: "at", word: "at" },
+      { tiles: "at", word: "at" },
+    ];
+    const env = (groups: typeof two) => ({ matchId: "m-p12b", events: [], state: { ...state, me: { ...state.me, groups } }, pending: null, result: null, matchFinished: false });
+    view.apply(env(two));
+    const grouped = () => view.looseSlots.flatMap((e) => (e?.groupId !== undefined ? [e.tileId] : []));
+    const thingAt = (slot: number) => {
+      const p = view.slots.get(`loose.${slot}@0`)!.place(0).position;
+      return view.pickables.find((t) => t.place.position.equals(p))!.id;
+    };
+    // 点最左边那组（对账把最左的 A、最左的 T 配给第 0 组）
+    const first = view.looseSlots.findIndex((e) => e?.groupId !== undefined);
+    view.focusGroupAt(thingAt(first));
+    const clicked = view.focusedGroupInfo()!.tileIds;
+    const others = grouped().filter((id) => !clicked.includes(id));
+    // 服务端拆掉一组：和 Table3D 一样，先摘 key 再对账
+    view.unmarkGroup(clicked);
+    view.apply(env(two.slice(1)));
+    expect(grouped().sort()).toEqual(others.sort());
+  });
+});
+
 /** 造一排，并把指定格子标成暗词 groupId（`groups` 的每一项是一组格子下标） */
 function rowWithGroups(pattern: string, groups: number[][]): LooseSlots {
   const s = row(pattern);

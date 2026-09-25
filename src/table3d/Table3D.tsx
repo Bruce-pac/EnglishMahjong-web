@@ -1100,7 +1100,8 @@ export function Table3D({
     ungroupActRef.current = () => {
       const info = tableView?.focusedGroupInfo();
       if (!info) return;
-      void submit((id) => api.ungroup(id, info.tiles)).then((ok) => {
+      // 先摘掉拆开的那几张的 key 再对账，两组相同的暗词才不会「拆错」画面上的那一组（P12）
+      void submit((id) => api.ungroup(id, info.tiles), [], () => tableView?.unmarkGroup(info.tileIds)).then((ok) => {
         if (ok && alive) tableView?.clearSelection();
       });
     };
