@@ -64,13 +64,62 @@ describe("SelectionValidator", () => {
     expect(h.validate).toHaveBeenCalledTimes(2);
   });
 
-  it("请求失败：交给 onError，状态回到 idle，不显示成「不是单词」", async () => {
+  it("请求失败：交给 onError，状态进 failed（key、tiles、word 不变），不显示成「不是单词」", async () => {
     const h = harness();
     h.v.update(word("cat"));
+    const checking = h.last() as { key: string; tiles: string; word: string };
     h.calls[0].reject(new Error("断网"));
     await flush();
     expect(h.errors).toHaveLength(1);
-    expect(h.last()).toMatchObject({ status: "idle" });
+    expect(h.last()).toEqual({ status: "failed", key: checking.key, display: "CAT", tiles: checking.tiles, word: checking.word });
+  });
+
+  describe("retry()（P13）", () => {
+    it("failed 之后重试：发第二次请求，先 checking 再 done", async () => {
+      const h = harness();
+      h.v.update(word("cat"));
+      h.calls[0].reject(new Error("断网"));
+      await flush();
+      h.v.retry();
+      expect(h.calls).toHaveLength(2);
+      expect(h.last()).toMatchObject({ status: "checking", display: "CAT" });
+      h.calls[1].resolve({ valid: true } as never);
+      await flush();
+      expect(h.last()).toMatchObject({ status: "done", display: "CAT" });
+    });
+
+    it("重试途中选区变了：重试的响应被丢弃", async () => {
+      const h = harness();
+      h.v.update(word("cat"));
+      h.calls[0].reject(new Error("断网"));
+      await flush();
+      h.v.retry();
+      h.v.update(word("act"));
+      h.calls[1].resolve({ valid: true } as never);
+      await flush();
+      expect(h.last()).toMatchObject({ status: "checking", display: "ACT" });
+    });
+
+    it("不是 failed 时调 retry() 不发请求", async () => {
+      const h = harness();
+      h.v.retry(); // idle
+      h.v.update(word("cat"));
+      h.v.retry(); // checking
+      h.calls[0].resolve({ valid: true } as never);
+      await flush();
+      h.v.retry(); // done
+      expect(h.calls).toHaveLength(1);
+    });
+
+    it("dispose() 之后 retry() 不发请求", async () => {
+      const h = harness();
+      h.v.update(word("cat"));
+      h.calls[0].reject(new Error("断网"));
+      await flush();
+      h.v.dispose();
+      h.v.retry();
+      expect(h.calls).toHaveLength(1);
+    });
   });
 
   it("过期的失败也丢弃，不弹通知", async () => {

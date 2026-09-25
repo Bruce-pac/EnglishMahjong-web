@@ -133,6 +133,21 @@ function modalOpen(): boolean {
   return document.querySelector(".overlay") !== null;
 }
 
+/**
+ * P13：校验请求失败（断网、服务端 500）时校验条上的「校验失败 · 重试」。
+ * 通知里说「为什么」，这里给「怎么办」：点一下用同一个选区再问一次。不自动重试
+ */
+function RetryCheck({ onRetry }: { onRetry: () => void }) {
+  return (
+    <span className="table3d-check-retry">
+      <span className="table3d-check-meta">校验失败 ·</span>
+      <button className="table3d-retry-btn" onClick={onRetry}>
+        重试
+      </button>
+    </span>
+  );
+}
+
 export function Table3D({
   config: configFromSetup = null,
   onBack,
@@ -201,6 +216,9 @@ export function Table3D({
   const [chiFail, setChiFail] = useState<Exclude<ChiMatch, { ok: true }>["reason"] | null>(null);
   /** 吃牌校验的结果（第二个校验器写） */
   const [chiCheck, setChiCheck] = useState<CheckState>({ status: "idle" });
+  /** P13：校验请求失败后「重试」按钮调这两个（框选校验条、吃牌 / 胡牌输入框各一个） */
+  const retryCheckRef = useRef<(() => void) | null>(null);
+  const retryChiRef = useRef<(() => void) | null>(null);
   const [chiArmed, setChiArmed] = useState(false);
   const [chiExpansion, setChiExpansion] = useState("");
   const chiRef = useRef<{
@@ -900,6 +918,8 @@ export function Table3D({
       },
     );
 
+    retryCheckRef.current = () => validator.retry();
+
     // ---- T6.1 吃牌 ----
     // 结果同样只有一个来源：mainLoop 每帧用输入框的内容对应一次，喂给第二个校验器。
     // 对应失败（凑不出 / 白搭超额）不发请求，只记原因；不列候选、不说差哪张（教学红线）
@@ -923,6 +943,7 @@ export function Table3D({
         if (alive) showNotice(e instanceof ApiError ? e.message : describeFailure(e));
       },
     );
+    retryChiRef.current = () => chiValidator.retry();
     function closeChi(): void {
       if (!chiOpenFlag && chiInputRef.current === "") return;
       chiOpenFlag = false;
@@ -1258,6 +1279,8 @@ export function Table3D({
       hintRef.current = null;
       chiValidator.dispose();
       ungroupActRef.current = null;
+      retryCheckRef.current = null;
+      retryChiRef.current = null;
       wildActRef.current = null;
       validator.dispose();
       window.clearTimeout(noticeTimer);
@@ -1472,6 +1495,7 @@ export function Table3D({
               </>
             )}
             {check.status === "checking" && <span className="table3d-check-meta">校验中…</span>}
+            {check.status === "failed" && <RetryCheck onRetry={() => retryCheckRef.current?.()} />}
             {check.status === "done" &&
               (check.result.valid ? (
                 <>
@@ -1602,6 +1626,9 @@ export function Table3D({
               {chiFail === "notAll" && <span className="table3d-check-bad">胡牌要用光全部散牌</span>}
               {chiFail === null && chiCheck.status === "checking" && (
                 <span className="table3d-check-meta">校验中…</span>
+              )}
+              {chiFail === null && chiCheck.status === "failed" && (
+                <RetryCheck onRetry={() => retryChiRef.current?.()} />
               )}
               {chiFail === null &&
                 chiCheck.status === "done" &&

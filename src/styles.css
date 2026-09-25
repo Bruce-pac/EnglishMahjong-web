@@ -2006,6 +2006,26 @@ button.footer-link {
   gap: 4px;
   max-width: 340px;
 }
+/* P13：校验失败后的「重试」，和校验条里的小按钮同一套 */
+.table3d-check-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.table3d-retry-btn {
+  padding: 1px 10px;
+  border-radius: 5px;
+  border: 1px solid #6c9a82;
+  background: #f3efe4;
+  color: #2b2b2b;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.table3d-retry-btn:hover {
+  border-color: var(--gold);
+}
 .table3d-wild-letter {
   width: 26px;
   height: 26px;
