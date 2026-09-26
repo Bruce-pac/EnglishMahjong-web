@@ -3,6 +3,7 @@ import { AI_NAMES } from "./aiNames";
 import { api, type AccountState, type MatchConfig, type MyStanding, type ProfileData } from "./api";
 import { Account } from "./components/Account";
 import { isMuted, setMuted } from "./sound";
+import { defaultTableStyle, detectDevice, type TableStyle } from "./table-style";
 import { Hand } from "./components/Hand";
 import { Profile } from "./components/Profile";
 import { RulesPage } from "./components/RulesPage";
@@ -358,15 +359,20 @@ export function viewForStart(table: TableStyle): "table3d" | "classic" {
 export function Setup({
   onStart,
   onBack,
+  defaultStyle,
 }: {
   onStart: (c: MatchConfig, table: TableStyle) => void;
   onBack: () => void;
+  /** 测试用：直接给默认样式。不传就按设备探测（P23） */
+  defaultStyle?: TableStyle;
 }) {
   const [c, setC] = useState<MatchConfig>(DEFAULTS);
   const set = (k: keyof MatchConfig, v: unknown) => setC({ ...c, [k]: v });
   // T7.1：牌桌样式。**不是 MatchConfig 的一部分**——服务端不认识它，不进开局请求。
   // 默认 3D，**故意不持久化**（用户 2026-09-22 定）：每次进设置页都从 3D 开始
-  const [table, setTable] = useState<TableStyle>("3d");
+  // P23：默认值随设备变——触屏或没有 WebGL 2 默认「经典」，其余 3D。
+  // 惰性初始值：只在挂载时探测一次，别每次渲染都建 canvas
+  const [table, setTable] = useState<TableStyle>(() => defaultStyle ?? defaultTableStyle(detectDevice()));
 
   return (
     <div className="setup-page">
@@ -475,9 +481,6 @@ export function Setup({
     </div>
   );
 }
-
-/** T7.1：设置页里选的牌桌样式。只在前端分叉用，不进 MatchConfig */
-type TableStyle = "3d" | "classic";
 
 export default function App() {
   const g = useGame();

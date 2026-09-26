@@ -361,7 +361,15 @@ export function Table3D({
       }
     }
 
-    const view = new MainView(mount, mainGroup);
+    // P23：拿不到 WebGL 上下文（浏览器禁用、老设备）时 WebGLRenderer 会同步抛错。
+    // 不接住的话 React 整棵树卸掉、整页白屏，连「← 返回」都没了。接住、显示报错条，后面的初始化一律不跑
+    let view: MainView;
+    try {
+      view = new MainView(mount, mainGroup);
+    } catch {
+      setFailure({ message: "这个浏览器打不开 3D 牌桌（不支持 WebGL）。点「← 返回」，开局时选「经典」。" });
+      return;
+    }
 
     // T2.2 中央记分盘：一张贴图平面，不进 Thing 池、不参与拾取。挂在 mainGroup 上，
     // 按 p 切透视重建的只是相机与后处理链，场景树不动，盘还在
@@ -1756,13 +1764,14 @@ export function Table3D({
           onLeaderboard={onLeaderboard}
         />
       )}
-      <div className="table3d-hint">
-        {wallLeft === null
-          ? failure
-            ? ""
-            : "发牌中…"
-          : `${myTurn ? "轮到你出牌：拖到牌河或右键 · " : ""}空格 低头 · z / x 缩放 · p 切透视 · 拖空白处框选`}
-      </div>
+      {/* 出错且还没上桌时没有提示可说：整条不画（P17 的胶囊底色空着会剩一个空框） */}
+      {!(wallLeft === null && failure) && (
+        <div className="table3d-hint">
+          {wallLeft === null
+            ? "发牌中…"
+            : `${myTurn ? "轮到你出牌：拖到牌河或右键 · " : ""}空格 低头 · z / x 缩放 · p 切透视 · 拖空白处框选`}
+        </div>
+      )}
     </div>
   );
 }

@@ -69,3 +69,61 @@ describe("3D 页开新局用哪份配置", () => {
     expect(c.maxGames).toBeGreaterThan(0);
   });
 });
+
+describe("P23：牌桌样式的默认值随设备变", () => {
+  it("四种组合：触屏或没有 WebGL 2 → 经典，其余 → 3D", async () => {
+    const { defaultTableStyle } = await import("./table-style");
+    expect(defaultTableStyle({ coarsePointer: false, webgl2: true })).toBe("3d");
+    expect(defaultTableStyle({ coarsePointer: true, webgl2: true })).toBe("classic");
+    expect(defaultTableStyle({ coarsePointer: false, webgl2: false })).toBe("classic");
+    expect(defaultTableStyle({ coarsePointer: true, webgl2: false })).toBe("classic");
+  });
+
+  it("node 环境（没有 matchMedia、没有 document）里探测不抛错，按「能用 3D」算", async () => {
+    const { detectDevice } = await import("./table-style");
+    expect(() => detectDevice()).not.toThrow();
+    expect(detectDevice()).toEqual({ coarsePointer: false, webgl2: true });
+  });
+
+  it("matchMedia 说是粗指针 → 探测出 coarsePointer；matchMedia 抛错也不崩", async () => {
+    const { detectDevice } = await import("./table-style");
+    const w = globalThis.window as unknown as { matchMedia?: unknown };
+    w.matchMedia = (q: string) => ({ matches: q === "(pointer: coarse)" });
+    expect(detectDevice().coarsePointer).toBe(true);
+    w.matchMedia = () => {
+      throw new Error("不支持");
+    };
+    expect(detectDevice().coarsePointer).toBe(false);
+    delete w.matchMedia;
+  });
+
+  it("拿不到 webgl2 上下文 → webgl2 为 false；拿到了会立刻 loseContext 释放", async () => {
+    const { detectDevice } = await import("./table-style");
+    const g = globalThis as unknown as { document?: unknown };
+    g.document = { createElement: () => ({ getContext: () => null }) };
+    expect(detectDevice().webgl2).toBe(false);
+    let released = 0;
+    const gl = { getExtension: (n: string) => (n === "WEBGL_lose_context" ? { loseContext: () => released++ } : null) };
+    g.document = { createElement: () => ({ getContext: (k: string) => (k === "webgl2" ? gl : null) }) };
+    expect(detectDevice().webgl2).toBe(true);
+    expect(released).toBe(1);
+    delete g.document;
+  });
+
+  it("Setup 不传默认样式时按设备探测：粗指针 → 经典被选中", () => {
+    const w = globalThis.window as unknown as { matchMedia?: unknown };
+    w.matchMedia = (q: string) => ({ matches: q === "(pointer: coarse)" });
+    try {
+      const html = renderToStaticMarkup(<Setup onStart={() => {}} onBack={() => {}} />);
+      expect(html).toMatch(/seg-btn seg-on[^>]*>经典</);
+    } finally {
+      delete w.matchMedia;
+    }
+  });
+
+  it("Setup 传入默认样式「经典」时，经典被选中", () => {
+    const html = renderToStaticMarkup(<Setup onStart={() => {}} onBack={() => {}} defaultStyle="classic" />);
+    expect(html).toMatch(/seg-btn seg-on[^>]*>经典</);
+    expect(html).toMatch(/seg-btn"[^>]*>3D 牌桌</);
+  });
+});
