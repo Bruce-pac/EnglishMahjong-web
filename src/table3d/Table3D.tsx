@@ -31,7 +31,7 @@ import { PrefsPanel } from "./PrefsPanel";
 // P1 音效：只许在这个文件里 import sound.ts（它在模块顶层读全局 localStorage，被测模块一引就崩）
 import { isMuted, play, setMuted } from "../sound";
 import { WordLogPanel } from "./WordLogPanel";
-import { nameplates, RIM_HEIGHT, RIM_WIDTH, TABLE_SIZE, type Nameplate } from "./nameplate";
+import { nameplates, RIM_HEIGHT, RIM_WIDTH, TABLE_SIZE, WOOD_SIDE, WOOD_TOP, type Nameplate } from "./nameplate";
 import { DefinitionCache, hoverCard, type Definition, type HoverCard } from "./hover-card";
 import type { WordEntry } from "./word-log";
 import { readHandCase, writeHandCase } from "./hand-case";
@@ -342,8 +342,8 @@ export function Table3D({
       const T = RIM_WIDTH;
       const H = RIM_HEIGHT;
       const c = WORLD_SIZE / 2;
-      const side = new MeshLambertMaterial({ color: 0x6b4226 });
-      const top = new MeshLambertMaterial({ color: 0x8a5a36 });
+      const side = new MeshLambertMaterial({ color: WOOD_SIDE });
+      const top = new MeshLambertMaterial({ color: WOOD_TOP });
       // BoxGeometry 的材质数组：±X、±Y、±Z，下标 4 是 +Z（顶面）
       const mats = [side, side, side, side, top, side];
       const bars: Array<[number, number, number, number]> = [

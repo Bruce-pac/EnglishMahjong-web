@@ -77,13 +77,24 @@ describe("亮哪一边", () => {
 describe("model 不变不重画", () => {
   /** node 里没有 canvas：造一个什么都不做的 2D 上下文 */
   function fakeCanvas(): HTMLCanvasElement {
-    const ctx = new Proxy({}, { get: (_t, p) => (p === "measureText" ? () => ({ width: 0 }) : () => {}), set: () => true });
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_t, p) =>
+          p === "measureText"
+            ? () => ({ width: 0 })
+            : p === "createRadialGradient" // P2 屏幕底色是径向渐变
+              ? () => ({ addColorStop: () => {} })
+              : () => {},
+        set: () => true,
+      },
+    );
     return { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement;
   }
 
   it("同一个 model 重复喂，只画一次、贴图不重新上传；变了才重画", () => {
-    const board = new CenterBoard(fakeCanvas());
-    const texture = (board.mesh.material as unknown as { map: { version: number } }).map;
+    const board = new CenterBoard(fakeCanvas(), 1, () => new Promise(() => {}));
+    const texture = board.texture;
     const env = envOf();
     board.update(boardModel(env, 0));
     const v = texture.version;
@@ -95,6 +106,42 @@ describe("model 不变不重画", () => {
     board.update(boardModel(env, 1)); // 换人行动
     expect(board.drawCount).toBe(2);
     expect(texture.version).toBe(v + 1);
+    board.dispose();
+  });
+
+  it("P2：数码管字体加载完成后强制重画一次（model 没变也要画），加载失败不重画、不崩", async () => {
+    let done: (ok: boolean) => void = () => {};
+    const board = new CenterBoard(fakeCanvas(), 1, () => new Promise((f) => (done = f)));
+    const env = envOf();
+    board.update(boardModel(env, 0));
+    expect(board.drawCount).toBe(1);
+    const v = board.texture.version;
+    done(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(board.drawCount).toBe(2);
+    expect(board.texture.version).toBe(v + 1);
+    // 之后照旧「不变不重画」
+    board.update(boardModel(env, 0));
+    expect(board.drawCount).toBe(2);
+    board.dispose();
+
+    let fail: (ok: boolean) => void = () => {};
+    const b2 = new CenterBoard(fakeCanvas(), 1, () => new Promise((f) => (fail = f)));
+    b2.update(boardModel(env, 0));
+    fail(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(b2.drawCount).toBe(1);
+    b2.dispose();
+  });
+
+  it("P2：台座 + 屏幕两个子网格，都不挡拾取", () => {
+    const board = new CenterBoard(fakeCanvas(), 1, () => new Promise(() => {}));
+    expect(board.mesh.children).toHaveLength(2);
+    const hits: unknown[] = [];
+    for (const o of [board.mesh, ...board.mesh.children]) {
+      o.raycast({} as never, hits as never);
+    }
+    expect(hits).toHaveLength(0);
     board.dispose();
   });
 });

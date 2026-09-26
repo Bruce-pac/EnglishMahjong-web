@@ -16,6 +16,9 @@ export const TABLE_SIZE = WORLD_SIZE + Size[ThingType.TILE].y;
 /** P16 木框：边条宽 T、高 H，底面在 z = −0.5，所以顶面在 z = H − 0.5 */
 export const RIM_WIDTH = 7;
 export const RIM_HEIGHT = 3;
+/** 木色：侧面、顶面。桌沿木框（P16）和中央中控台的台座（P2）共用这一份 */
+export const WOOD_SIDE = 0x6b4226;
+export const WOOD_TOP = 0x8a5a36;
 
 export interface Nameplate {
   seat: number;
