@@ -6,7 +6,9 @@
 
 **🎮 在线试玩：[englishmahjong.com](https://englishmahjong.com)** —— 免注册、免下载，点开就打。
 
-![对局截图](docs/game.png)
+3D 牌桌：用鼠标拖牌重排、框选拼词，按 `p` 切透视。
+
+![对局截图：3D 牌桌透视视角](docs/game.jpg)
 
 ## 灵感来源
 
@@ -38,7 +40,7 @@
 
 ## 这个仓库是什么
 
-英语麻将的**网页前端**（React 18 + TypeScript + Vite，样式为手写 CSS，无 UI 框架）。
+英语麻将的**网页前端**（React 18 + TypeScript + Vite，3D 牌桌用 three.js，样式为手写 CSS，无 UI 框架）。
 
 一个刻意的架构决定：**前端零规则、零词典**。它只做三件事——渲染服务端下发的牌局状态、回放事件动画、把你的操作发回去。词典（17 万词）、规则引擎、AI、计分全部在服务端：
 
@@ -53,6 +55,7 @@
 npm install
 npm run dev          # Vite dev server，/api 代理到 localhost:8000
 npm run build        # 含 tsc 类型检查
+npm test             # vitest 单元测试
 node playthrough.mjs # Playwright 端到端：真实浏览器打完一整局
 ```
 
