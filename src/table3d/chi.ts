@@ -18,6 +18,7 @@
  * 失败只给原因，**不说差哪张牌**（教学红线：不提示）。
  */
 
+import type { HintPick } from "./hint-pick";
 import { WILD_CANDIDATES } from "./atlas";
 import type { LooseEntry, LooseSlots } from "./loose-reconcile";
 import { MAX_WILDS_PER_WORD } from "./spell";
@@ -58,12 +59,23 @@ export function matchHint(loose: LooseSlots, word: string, wild?: string): ChiMa
 }
 
 /**
+ * P24：吃牌 / 胡牌这次提交带不带 `viaHint`。
+ *
+ * 只有吃牌、且提交的词**正好**是最后点过的那个候选（`HintPick`，决策一换就清），才算被提示。
+ * 点了候选又改词、没点直接输入（哪怕输的正是候选里的词）、只打开列表看了没点，都不算——
+ * 被提示会在正题集里留印记，宁可少记、不能多记（CLAUDE.md 教学红线）。胡牌服务端不给提示，恒为否
+ */
+export function claimViaHint(kind: "chi" | "win", pick: Pick<HintPick, "viaHint">, word: string): boolean {
+  return kind === "chi" && pick.viaHint(word);
+}
+
+/**
  * 吃牌 / 胡牌提交什么、对账要移除哪几张（T6.1 / T6.2 / T6.3）。
  *
  * - 吃牌：`tiles` 是手里用到的牌 + 打出的那张；用掉的牌离开散牌区进亮词区，`consumedTileIds` 是对应出来的那几张
  * - 胡牌：只报词（服务端要求恰好用光全部散牌 + 那张牌）；牌**不离开**手牌——服务端反而把胡的那张加进来
  *   （engine.py commit_win 胡了才 hand.append），所以不移除任何牌
- * - `viaHint`：提示模式下从候选列表里选的词（T6.2），服务端据此在正题集里记「被提示」
+ * - `viaHint`：由 claimViaHint 判定（点过的候选原样提交才算），服务端据此在正题集里记「被提示」
  */
 export function claimSubmission(
   kind: "chi" | "win",

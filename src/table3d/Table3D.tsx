@@ -5,7 +5,7 @@ import { AssetLoader } from "./asset-loader";
 import { WILD_CANDIDATES } from "./atlas";
 import { SelectionValidator, type CheckState } from "./check";
 import { ConfirmGate } from "./confirm";
-import { claimSubmission, matchChi, matchHint, matchWin, type ChiMatch } from "./chi";
+import { claimSubmission, claimViaHint, matchChi, matchHint, matchWin, type ChiMatch } from "./chi";
 import { decisionKeyOf, HintPick } from "./hint-pick";
 import { HintList, HintPanel, type Hint, type HintNote } from "./HintPanel";
 import { groupKeyOf } from "./loose-reconcile";
@@ -630,8 +630,6 @@ export function Table3D({
     // ---- T6.2 提示 ----
     const hintPick = new HintPick();
     let hintDecision = "";
-    /** 本场开没开提示（effect 里读；界面上用的是 hintsOn 状态） */
-    let hintsOnFlag = false;
     /** 「第 N 胡」标记（mainLoop 每帧按它投影） */
     let marks: WinMarker[] = [];
     /** P4 桌沿名牌（每帧投影用这份，React 那份只管渲染 DOM） */
@@ -877,7 +875,6 @@ export function Table3D({
       setHintsOn(env.state.config.hints);
       setConfig(env.state.config);
       setWordList(env.state.wordList ?? null);
-      hintsOnFlag = env.state.config.hints;
       // 提示：决策换了（摸了新牌、轮到别家）就清掉点过的词、收起列表、取消高亮
       const decision = decisionKeyOf(env);
       if (decision !== hintDecision) {
@@ -1064,8 +1061,13 @@ export function Table3D({
         setChiOpen(true);
       },
       cancel: () => closeChi(),
-      /** 提示模式：点了某个候选词，等同于把它填进输入框 */
+      /**
+       * 提示模式：点了某个候选词，等同于把它填进输入框，并记下「点过这个词」（viaHint 靠它判定，
+       * 和自己回合的提示用同一个 HintPick，决策一换就清）
+       */
       choose: (word: string) => {
+        hintPick.pick(word);
+        setHintPicked(hintPick.word);
         chiInputRef.current = word;
         setChiInput(word);
       },
@@ -1082,8 +1084,15 @@ export function Table3D({
         }
         setChiArmed(false);
         // 提交内容和对账要移除哪几张，由纯函数 claimSubmission 决定（单测钉着）：
-        // 吃牌移除对应出来的那几张；胡牌不移除（牌不离开手牌）；提示模式的吃牌带 viaHint
-        const sub = claimSubmission(kind, chiMatch, chiCurrent.word, exp || undefined, kind === "chi" && hintsOnFlag);
+        // 吃牌移除对应出来的那几张；胡牌不移除（牌不离开手牌）。
+        // viaHint（P24）：提交的词正好是点过的那个候选才带，自己输入的不带（claimViaHint，单测钉着）
+        const sub = claimSubmission(
+          kind,
+          chiMatch,
+          chiCurrent.word,
+          exp || undefined,
+          claimViaHint(kind, hintPick, chiCurrent.word),
+        );
         void submit((id) => api.act(id, sub.body), sub.consumedTileIds);
       },
     };
@@ -1715,7 +1724,8 @@ export function Table3D({
             onPick={(h) => hintRef.current?.pick(h)}
           />
         )}
-        {/* T6.1 吃牌（输入框模式）。不读 pending.hints、不列候选：玩家自己想出词来 */}
+        {/* T6.1 吃牌。输入框始终在；本场开了提示时上面再列服务端给的候选（P24：两者并存，
+            候选里没有的词照样能自己输入） */}
         {chiTurn && !chiOpen && (
           <button className="table3d-act-btn" disabled={busyUi} onClick={() => chiRef.current?.open()}>
             {claimWin ? "胡" : "吃"} {chiLabel}
@@ -1724,16 +1734,16 @@ export function Table3D({
         {chiTurn && chiOpen && (
           <div className="table3d-chi">
             {chiHintMode && (
-              // 提示模式的吃牌：只展示服务端给的候选（pending.hints），前端不算任何候选
+              // 提示模式的吃牌：只展示服务端给的候选（pending.hints），前端不算任何候选。
+              // 高亮的是「点过、且输入框里还是它」的那一项——和这次提交算不算被提示一致
               <HintList
                 hints={hintList}
-                picked={chiInput.trim().toLowerCase() || null}
+                picked={hintPicked !== null && hintPicked === chiInput.trim().toLowerCase() ? hintPicked : null}
                 note={(h) => hintNotes[h.word] ?? null}
                 onPick={(h) => chiRef.current?.choose(h.word)}
               />
             )}
             <div className="table3d-act-row">
-              {!chiHintMode && (
               <input
                 className="table3d-chi-input"
                 autoFocus
@@ -1746,7 +1756,6 @@ export function Table3D({
                 spellCheck={false}
                 autoComplete="off"
               />
-              )}
               <button
                 className={`table3d-act-btn${chiArmed ? " confirm" : ""}`}
                 disabled={!chiReady}
@@ -1765,7 +1774,8 @@ export function Table3D({
             <div className="table3d-chi-status">
               {chiFail === "missing" && (
                 <span className="table3d-check-bad">
-                  {chiHintMode ? (hintNotes[chiInput.trim().toLowerCase()]?.text ?? "要先拆开暗词") : "手里凑不出这个词"}
+                  {/* 输入的是候选词、且有现成注明（「要先拆开暗词」）就照旧显示；否则和非提示模式一样 */}
+                  {(chiHintMode && hintNotes[chiInput.trim().toLowerCase()]?.text) || "手里凑不出这个词"}
                 </span>
               )}
               {chiFail === "tooManyWilds" && <span className="table3d-check-bad">一个词最多只能用一张白搭</span>}

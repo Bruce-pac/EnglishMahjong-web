@@ -2194,6 +2194,11 @@ button.footer-link {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/* 占位提示是一句中文说明，比输入的单词小一号 */
+.table3d-chi-input::placeholder {
+  font-size: 13px;
+  letter-spacing: 0;
+}
 .table3d-chi-status {
   display: flex;
   flex-wrap: wrap;
