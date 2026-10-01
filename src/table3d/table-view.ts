@@ -987,6 +987,14 @@ export class TableView {
     return pose;
   }
 
+  /**
+   * 所有补间立刻落到终点（「提前结算」跳到终局时用）：不留任何还在飞的牌。
+   * 就是拿一个「无穷远的将来」跑一帧 update——补间、让位滑动全都到点、删掉，画在终点上
+   */
+  finishTweens(): void {
+    this.update(Number.POSITIVE_INFINITY);
+  }
+
   /** 还有牌在补间（测试、回放层用） */
   get animating(): boolean {
     return this.tweens.size > 0;

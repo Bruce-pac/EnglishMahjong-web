@@ -412,6 +412,7 @@ export function Hand({
             <span className="checker-meta">
               {check.score} 分
               {check.inTier && " · 词库内 +10"}
+              {check.inList && " · 词单词"}
               {check.drawCount! > 0 && ` · 亮出可补摸 ${check.drawCount} 张`}
             </span>
           )}

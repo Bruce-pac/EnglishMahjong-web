@@ -30,9 +30,12 @@ const DIFFICULTY_NAMES: Readonly<Record<string, string>> = {
   hard: "困难",
 };
 
-/** 配置条要显示的六项。纯函数，单测钉着文案 */
-export function configRows(config: State["config"]): Array<{ label: string; value: string; title?: string }> {
-  return [
+/** 配置条要显示的六项（用了自建词单再多一行）。纯函数，单测钉着文案 */
+export function configRows(
+  config: State["config"],
+  wordList: State["wordList"] = null,
+): Array<{ label: string; value: string; title?: string }> {
+  const rows = [
     { label: "词库", value: TIER_NAMES[config.tier] ?? config.tier },
     { label: "难度", value: DIFFICULTY_NAMES[config.difficulty] ?? config.difficulty },
     { label: "词长", value: `≥${config.minWordLen}`, title: "拼出的词至少要几个字母" },
@@ -48,6 +51,10 @@ export function configRows(config: State["config"]): Array<{ label: string; valu
     },
     { label: "提示", value: config.hints ? "开" : "关", title: "开：轮到你时可以看服务端给的候选词" },
   ];
+  if (wordList) {
+    rows.push({ label: "词单", value: `${wordList.name}（胡牌至少 ${wordList.need} 个词单词）` });
+  }
+  return rows;
 }
 
 /**
@@ -56,7 +63,15 @@ export function configRows(config: State["config"]): Array<{ label: string; valu
  * `onPeek`：鼠标移进来（或键盘聚焦）时通知调用方。右上角同一个角落里还有 ⚙ 面板，
  * 两张同时展开会叠在一起、字互相压着（审查实测重叠约 86px），所以这里一展开就让 ⚙ 收起。
  */
-export function ConfigBar({ config, onPeek }: { config: State["config"] | null; onPeek?: () => void }) {
+export function ConfigBar({
+  config,
+  wordList = null,
+  onPeek,
+}: {
+  config: State["config"] | null;
+  wordList?: State["wordList"];
+  onPeek?: () => void;
+}) {
   if (!config) return null;
   return (
     <div
@@ -71,7 +86,7 @@ export function ConfigBar({ config, onPeek }: { config: State["config"] | null; 
         ⓘ
       </span>
       <div className="table3d-config-panel">
-        {configRows(config).map((row) => (
+        {configRows(config, wordList).map((row) => (
           <div className="table3d-config-row" key={row.label} title={row.title}>
             <span className="table3d-config-label">{row.label}</span>
             <b>{row.value}</b>

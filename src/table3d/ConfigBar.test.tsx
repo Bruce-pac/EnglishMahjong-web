@@ -51,6 +51,15 @@ describe("配置条", () => {
     expect(configRows(config({ bloody: false, hints: false })).slice(4).map((r) => r.value)).toEqual(["关", "关"]);
   });
 
+  it("用了词单多一行「词单」，不用时还是六行", () => {
+    const rows = configRows(config(), { name: "机械专业", need: 2, have: 0 });
+    expect(rows).toHaveLength(7);
+    expect(rows[6]).toEqual({ label: "词单", value: "机械专业（胡牌至少 2 个词单词）" });
+    expect(configRows(config(), null)).toHaveLength(6);
+    const html = renderToStaticMarkup(<ConfigBar config={config()} wordList={{ name: "机械专业", need: 1, have: 1 }} />);
+    expect(html).toContain("机械专业（胡牌至少 1 个词单词）");
+  });
+
   it("还没拿到 envelope 时什么都不画", () => {
     expect(renderToStaticMarkup(<ConfigBar config={null} />)).toBe("");
   });

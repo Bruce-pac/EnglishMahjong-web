@@ -7,33 +7,37 @@
  */
 
 import type { Me, Other } from "../api";
+import { spectateStatus } from "../spectate";
 import { WordTiles } from "./WordTiles";
 
 interface Props {
   me: Me;
   others: Other[];
+  bloody: boolean;
+  /** 本局打完了（服务端的 state.finished） */
+  finished: boolean;
+  /** 给了就在右边出「提前结算」：跳过剩下的回放，直接进结算 */
+  onSkip?: () => void;
 }
 
-export function Spectating({ me, others }: Props) {
+export function Spectating({ me, others, bloody, finished, onSkip }: Props) {
   const stillPlaying = others.filter((o) => !o.won).length;
   const words = [...me.melds, ...me.concealed];
 
-  /**
-   * 只剩一家时，血战到底就结束了（引擎里 `len(active()) <= 1` 即收场）——
-   * 最后那家没人可打了。这时候没什么可「观战」的，本局已经完了，直接说在结算。
-   */
-  const over = stillPlaying <= 1;
+  // 非血战局、血战局打完了、只剩一家：都已经没什么可「观战」的，说清楚本局结束
+  const { over, note } = spectateStatus({ bloody, finished, stillPlaying });
 
   return (
     <div className={`spectating ${over ? "spectating-over" : ""}`}>
       <div className="spectating-head">
         <span className="spectating-badge">{over ? "🏁 本局结束" : "👁 观战中"}</span>
         <b>你已胡牌（第 {(me.winOrder ?? 0) + 1} 个）</b>
-        <span className="spectating-note">
-          {over
-            ? "只剩一家，本局已结束，正在结算…"
-            : `血战到底：还有 ${stillPlaying} 家在打，打完才结算`}
-        </span>
+        <span className="spectating-note">{note}</span>
+        {onSkip && (
+          <button className="btn btn-primary spectating-skip" onClick={onSkip}>
+            提前结算 →
+          </button>
+        )}
       </div>
 
       <div className="spectating-hand">

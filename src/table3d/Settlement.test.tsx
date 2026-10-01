@@ -15,8 +15,14 @@ const row = (seat: number, score: number, winOrder: number | null, words: string
   words,
 });
 
-function render(result: Result, matchFinished: boolean, gamesPlayed = 1) {
-  const state: State = { ...structuredClone(fixtureGames()[0].steps[2].state), gamesPlayed, maxGames: 4, matchScores: [30, 50, 10, 20] };
+function render(result: Result, matchFinished: boolean, gamesPlayed = 1, wordList: State["wordList"] = null) {
+  const state: State = {
+    ...structuredClone(fixtureGames()[0].steps[2].state),
+    gamesPlayed,
+    maxGames: 4,
+    matchScores: [30, 50, 10, 20],
+    wordList,
+  };
   return renderToStaticMarkup(
     <Settlement result={result} state={state} matchFinished={matchFinished} busy={false} onNext={() => {}} onBack={() => {}} />,
   );
@@ -27,6 +33,7 @@ const baseResult = (over: Partial<Result> = {}): Result => ({
   myWords: ["cat"],
   missed: ["act"],
   leftover: ["a", "1"],
+  listWords: [],
   ...over,
 });
 
@@ -63,6 +70,28 @@ describe("结算面板", () => {
   it("荒牌要写明荒牌", () => {
     const html = render(baseResult({ exhausted: true, rows: [row(0, 0, null), row(1, 0, null), row(2, 0, null), row(3, 0, null)] }), false);
     expect(html).toContain("荒牌");
+  });
+
+  it("荒牌：有人胡过写「剩下的人没胡」，没人胡照旧「这一局没人胡」", () => {
+    const someWon = render(baseResult({ exhausted: true }), false);
+    expect(someWon).toContain("牌墙摸完了，剩下的人没胡");
+    expect(someWon).not.toContain("这一局没人胡");
+    const noneWon = render(baseResult({ exhausted: true, rows: [row(0, 0, null), row(1, 0, null)] }), false);
+    expect(noneWon).toContain("牌墙摸完了，这一局没人胡");
+  });
+
+  it("用了词单：列出本局词单词；一个都没有时写明", () => {
+    const wl = { name: "机械专业", need: 1, have: 2 };
+    const some = render(baseResult({ listWords: ["torque", "gear"] }), false, 1, wl);
+    expect(some).toContain("📋 本局词单词 2 个（机械专业）");
+    expect(some).toMatch(/TORQUE<\/span><span[^>]*>GEAR</);
+    const none = render(baseResult({ listWords: [] }), false, 1, wl);
+    expect(none).toContain("📋 本局词单词（机械专业）");
+    expect(none).toContain("这局一个词单词都没拼出来");
+  });
+
+  it("不用词单：没有「本局词单词」这一块", () => {
+    expect(render(baseResult(), false)).not.toContain("本局词单词");
   });
 
   it("整场没打完：只有 [下一局]", () => {

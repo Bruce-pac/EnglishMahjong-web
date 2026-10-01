@@ -167,7 +167,10 @@ export function replayDiff(prev: State, events: readonly GameEvent[], next: Stat
     const o = got.others.find((x) => x.seat === want.seat);
     if (!o) return `少了座位 ${want.seat}`;
     if (o.handCount !== want.handCount) return `座位 ${want.seat} handCount：推演 ${o.handCount}，实际 ${want.handCount}`;
-    if (JSON.stringify(o.melds) !== JSON.stringify(want.melds)) return `座位 ${want.seat} melds 对不上`;
+    // 只比牌面和词。服务端的词上还带 `inList`（是不是词单词），那是服务端裁决的标记，
+    // 推演不出来也不该推演（前端零规则）——整个对象去比，用了词单的对局必然对不上
+    const meldsOf = (ms: readonly { tiles: string; word: string }[]) => JSON.stringify(ms.map((x) => [x.tiles, x.word]));
+    if (meldsOf(o.melds) !== meldsOf(want.melds)) return `座位 ${want.seat} melds 对不上`;
     if (o.won !== want.won || o.winOrder !== want.winOrder) return `座位 ${want.seat} won/winOrder 对不上`;
   }
   const myRevealDrew = events.some((e) => e.t === "reveal" && e.seat === prev.me.seat && (e.draws ?? 0) > 0);

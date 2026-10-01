@@ -14,6 +14,9 @@ import { Spectating } from "./components/Spectating";
 import { TableScene } from "./scene/TableScene";
 import { Tile } from "./components/Tile";
 import { WordTiles } from "./components/WordTiles";
+import { WordListSetting } from "./components/WordLists";
+import { listProgress } from "./wordLists";
+import { canSkipReplay } from "./spectate";
 import { useGame } from "./hooks/useGame";
 
 /**
@@ -373,6 +376,12 @@ export function Setup({
   // P23：默认值随设备变——触屏或没有 WebGL 2 默认「经典」，其余 3D。
   // 惰性初始值：只在挂载时探测一次，别每次渲染都建 canvas
   const [table, setTable] = useState<TableStyle>(() => defaultStyle ?? defaultTableStyle(detectDevice()));
+  // 自建词单：选了哪份、胡牌至少要几个词单词。只有「选了哪份」记进 localStorage（需求 §2.2）
+  const [listId, setListId] = useState<number | null>(null);
+  const [listNeed, setListNeed] = useState(1);
+  // 不用词单时两个字段都不带——开局请求和改之前一字不差
+  const startConfig = (): MatchConfig =>
+    listId === null ? c : { ...c, wordListId: listId, listNeed };
 
   return (
     <div className="setup-page">
@@ -402,6 +411,15 @@ export function Setup({
           <Seg options={TIERS as [string, string][]} value={c.tier} onChange={(v) => set("tier", v)} />
           <p className="setup-group-hint">加分和提示都围着这个词库转；AI 的词汇量也跟着它走。</p>
         </div>
+
+        <WordListSetting
+          listId={listId}
+          need={listNeed}
+          onChange={(id, need) => {
+            setListId(id);
+            setListNeed(need);
+          }}
+        />
 
         <div className="setup-group">
           <div className="setup-group-label">AI 难度</div>
@@ -474,7 +492,7 @@ export function Setup({
           onChange={(v) => set("hints", v)}
         />
 
-        <button className="btn btn-primary btn-cta" onClick={() => onStart(c, table)}>
+        <button className="btn btn-primary btn-cta" onClick={() => onStart(startConfig(), table)}>
           ▶ 开始游戏
         </button>
       </div>
@@ -691,6 +709,12 @@ export default function App() {
         <span>
           词库 <b>{TIERS.find((t) => t[0] === state.config.tier)?.[1]}</b>
         </span>
+        {/* 自建词单：够不够数由服务端数好（state.wordList），这里只显示。不用词单时整项不出 */}
+        {state.wordList && (
+          <span title={`胡牌时亮词和暗词里至少要有 ${state.wordList.need} 个词单词`}>
+            词单 <b>{state.wordList.name}</b> · {listProgress(state.wordList)}
+          </span>
+        )}
         <span>
           难度 <b>{{ easy: "简单", normal: "普通", hard: "困难" }[state.config.difficulty]}</b>
         </span>
@@ -816,7 +840,22 @@ export default function App() {
       {/* 胡牌退出后，手牌区换成观战条——否则界面一片死寂，
           你连自己在等什么都不知道，还以为卡死了 */}
       {me.won ? (
-        <Spectating me={me} others={state.others} />
+        <Spectating
+          me={me}
+          others={state.others}
+          bloody={state.config.bloody}
+          finished={state.finished}
+          onSkip={
+            canSkipReplay({
+              bloody: state.config.bloody,
+              meWon: me.won,
+              replaying: g.replaying,
+              stillPlaying: state.others.filter((o) => !o.won).length,
+            })
+              ? g.skipReplay
+              : undefined
+          }
+        />
       ) : (
       <Hand
         loose={me.loose}

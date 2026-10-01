@@ -255,6 +255,7 @@ describe("B 层：concealed 与 handCount 是同一批牌", () => {
       gamesPlayed: 0,
       maxGames: 1,
       config: {} as State["config"],
+      wordList: null,
     }) as State;
 
   const looseOf = (state: State) =>

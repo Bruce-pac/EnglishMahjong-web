@@ -90,7 +90,7 @@ describe("换局重置", () => {
     const declared = view.looseSlots.find((e) => e?.tile === "1")!;
     const declaredSlot = view.looseSlots.indexOf(declared); // 结算前白搭所在的格子
     // 第 1 局结算：胡的那张 T 加进手牌，gamesPlayed 变 1，带 result
-    const result: Result = { rows: [], exhausted: false, myWords: [], missed: [], leftover: [] };
+    const result: Result = { rows: [], exhausted: false, myWords: [], missed: [], leftover: [], listWords: [] };
     const settled: Envelope = { ...env(stateOf(["1", "d", "c", "a", "t", "t"], [{ tiles: "act", word: "cat" }], 1)), result };
     view.apply(settled);
     // 同一张白搭（同一个 tileId）还在结算前那一格：没有被当成换局清空重铺

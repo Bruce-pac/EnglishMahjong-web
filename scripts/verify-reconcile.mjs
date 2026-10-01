@@ -24,7 +24,7 @@ const a = await import("../src/table3d/thing-assign.ts");
 // T2.1 改过一次规则（摸牌从右端加、右端满了从右往里挤空隙），两处各写一份就是这样漏掉的
 const { suffixShiftError } = await import("../src/table3d/test-helpers.ts");
 // T5.1 推演不变式：fold(上一步 state, events) ≡ 这一步 state。判定与单测共用 replayDiff
-const { replayDiff } = await import("../src/table3d/replay.ts");
+const { replayDiff, stepState } = await import("../src/table3d/replay.ts");
 // T2.2：envelope 没有庄家字段，盘上的 East 靠「庄家 = gameIndexOf % 4」推出来。
 // 开新局的 envelope 带从开局起的全部事件，第一个 draw 就是庄家摸的——拿它核对这条推论
 // 核对的是盘面实际用的 dealerOf，不是另写一遍公式——否则 dealerOf 被改坏了这里抓不到
@@ -120,6 +120,8 @@ const slotOf = (slots) => new Map(slots.flatMap((e, i) => (e ? [[e.tileId, i]] :
 const wildOf = (slots) => new Map(slots.flatMap((e) => (e ? [[e.tileId, e.wildLetter]] : [])));
 
 let steps = 0;
+/** W6「提前结算」：回放放到一半就跳到终局，模拟过几次 */
+let jumped = 0;
 /** 推演不变式验过几步（换局那一步不算：新一局的 events 从空桌开始，不接上一局的 state） */
 let replayed = 0;
 /** 推演过的事件按种类计数：没见过 chi / 点炮胡的话，那两条语义等于没验 */
@@ -219,6 +221,27 @@ for (let round = 0; games < GAMES; round++) {
     const bad = replayDiff(state, env.events, env.state);
     if (bad) fail(`推演不变式：局${round}步${step} ${bad}\n  events=${JSON.stringify(env.events)}`);
     replayed++;
+    // W6「提前结算」：随机挑一半回包，照回放层那样推演到事件中途的某一步、对账一次，
+    // 然后不再逐步推——下一轮循环开头直接对账到终局（和 Table3D 的 fastForward 出口一样）。
+    // 两次对账都要满足不变式 3、4；终局那次在循环开头照常验全部五条
+    if (env.events.length > 1 && rand() < 0.5) {
+      const k = 1 + Math.floor(rand() * (env.events.length - 1));
+      let mid = state;
+      for (const e of env.events.slice(0, k)) mid = stepState(mid, e);
+      const before = slotOf(r.slots);
+      const wildBefore = wildOf(r.slots);
+      const rm = m.reconcileLoose(mid.me, r.slots, r.nextTileId);
+      if (!rm.rebuilt) {
+        const bad3 = suffixShiftError(before, slotOf(rm.slots));
+        if (bad3) fail(`提前结算（中途那一步）不变式3：局${round}步${step} ${bad3}`);
+        for (const [id, w] of wildOf(rm.slots)) {
+          if (wildBefore.has(id) && w !== wildBefore.get(id))
+            fail(`提前结算（中途那一步）不变式4：局${round}步${step} tile ${id} 白搭声明串了`);
+        }
+      }
+      r = rm;
+      jumped++;
+    }
     for (const e of env.events) {
       const k = e.t === "win" ? (e.selfDrawn ? "win(自摸)" : "win(点炮)") : e.t;
       eventKinds[k] = (eventKinds[k] ?? 0) + 1;
@@ -229,5 +252,6 @@ for (let round = 0; games < GAMES; round++) {
 
 console.log(`✓ ${games} 局 / ${steps} 步，五条不变式全部成立；推演不变式验了 ${replayed} 步`);
 console.log(`  推演过的事件：${JSON.stringify(eventKinds)}`);
+console.log(`  提前结算（推到事件中途再直接跳到终局）模拟了 ${jumped} 次`);
 console.log(`  庄家推论（开局第一个 draw 的座位 = dealerOf）核对了 ${dealerChecked} 局`);
 console.log(`  开局推演（刚发完的局面 + events ≡ envelope）验了 ${openingChecked} 局`);

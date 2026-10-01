@@ -127,6 +127,17 @@ describe("推演不变式：fold(上一步 state, events) ≡ 这一步 state", 
     for (const t of ["draw", "discard", "reveal"]) expect(seen, `录制里没有 ${t}`).toContain(t);
   });
 
+  it("别家的亮词只比牌面和词：服务端带的 inList（词单标记）推演不出来，也不算对不上", () => {
+    const prev = base();
+    const ev: GameEvent = { t: "reveal", seat: 1, tiles: "act", word: "cat", draws: 0 };
+    const next = stepState(prev, ev);
+    other(next, 1).melds = other(next, 1).melds.map((x) => ({ ...x, inList: true }) as typeof x);
+    expect(replayDiff(prev, [ev], next)).toBeNull();
+    // 词本身不同照样抓住
+    other(next, 1).melds = [{ tiles: "act", word: "act" }];
+    expect(replayDiff(prev, [ev], next)).toMatch(/melds/);
+  });
+
   it("豁免只有一条：自己 reveal 且 draws > 0 时不比自己的 hand", () => {
     const prev = base();
     const next = stepState(prev, { t: "reveal", seat: 0, tiles: "act", word: "cat", draws: 1 });

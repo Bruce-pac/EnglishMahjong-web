@@ -27,6 +27,8 @@ import { actorOf, boardModel, nextReplayActor } from "./board-model";
 import { CenterBoard } from "./center-board";
 import { CharacterLayer } from "./characters";
 import { ConfigBar } from "./ConfigBar";
+import { listProgress } from "./word-list";
+import { canSkipReplay, spectateOf, spectateText } from "./spectate";
 import { PrefsPanel } from "./PrefsPanel";
 // P1 音效：只许在这个文件里 import sound.ts（它在模块顶层读全局 localStorage，被测模块一引就崩）
 import { isMuted, play, setMuted } from "../sound";
@@ -233,6 +235,8 @@ export function Table3D({
   const [chiCheck, setChiCheck] = useState<CheckState>({ status: "idle" });
   /** P13：校验请求失败后「重试」按钮调这两个（框选校验条、吃牌 / 胡牌输入框各一个） */
   const retryCheckRef = useRef<(() => void) | null>(null);
+  /** 「提前结算」：跳过剩下的回放，直接落到这次 envelope 的终局。回放不在进行时是空操作 */
+  const skipReplayRef = useRef<(() => void) | null>(null);
   const retryChiRef = useRef<(() => void) | null>(null);
   const [chiArmed, setChiArmed] = useState(false);
   const [chiExpansion, setChiExpansion] = useState("");
@@ -251,6 +255,8 @@ export function Table3D({
   const [hintsOn, setHintsOn] = useState(false);
   /** 本场玩法配置（T2.3a）。只认服务端下发的那份：本地开局配置在刷新恢复时是默认值 */
   const [config, setConfig] = useState<State["config"] | null>(null);
+  /** 自建词单的进度（服务端数好的 have / need）。不用词单时为 null，右上角不出小条 */
+  const [wordList, setWordList] = useState<State["wordList"]>(null);
   // ---- T2.3b 偏好 ----
   /** ⚙ 面板开着没有。点图标、点面板外、按 Esc 都能收 */
   const [prefsOpen, setPrefsOpen] = useState(false);
@@ -286,6 +292,8 @@ export function Table3D({
   const [locked, setLocked] = useState(false);
   /** 正在回放别家的动作（T5.2）：本地操作照常，提交按钮灰掉、旁边注明「等别家出完」 */
   const [replayingUi, setReplayingUi] = useState(false);
+  /** 回放里你已经胡了：第几个胡、还有几家在打（观战横幅用）。没胡、或回放放完了为 null */
+  const [spectate, setSpectate] = useState<{ order: number; left: number } | null>(null);
   /** 已胡各家的「第 N 胡」。文字由 React 渲染，位置每帧直接改 DOM（同 [拆开]） */
   const [winMarks, setWinMarks] = useState<WinMarker[]>([]);
   const markerEls = useRef(new Map<number, HTMLDivElement>());
@@ -658,6 +666,10 @@ export function Table3D({
     /** 正在回放。回放期间又来了 envelope：先快进到底再处理 */
     let replaying: Promise<void> | null = null;
     let fastForward = false;
+    /** 玩家点了「提前结算」：回放在这一步停下，对齐终局后把补间一并落地 */
+    let skipRequested = false;
+    /** 叫醒回放当前这一步的停顿（「提前结算」不用等这一步停完） */
+    let wakeDwell: (() => void) | null = null;
     /** 回放进行中（右键打牌时给句提示用；界面上用的是 replayingUi） */
     let replayingFlag = false;
     // 气泡：同一家新气泡顶掉旧的；停 SAY_MS 后淡出 0.3s 再撤掉（同 Mahjong 项目的 say-ui）
@@ -760,16 +772,32 @@ export function Table3D({
             cast.setActor(actor); // 前倾和记分盘的亮边同一家
             const line = sayOf(e);
             if (line && e.seat !== undefined) say(e.seat, line);
+            setSpectate(spectateOf(next));
             // 牌 180ms 飞到位，剩下的时间静止；吃、亮词、胡停得更久，气泡读得完
-            await new Promise((f) => setTimeout(f, dwellOf(e)));
+            await new Promise<void>((f) => {
+              const t = window.setTimeout(f, dwellOf(e));
+              wakeDwell = () => {
+                window.clearTimeout(t);
+                f();
+              };
+            });
+            wakeDwell = null;
           }
         } finally {
           replaying = null;
+          wakeDwell = null;
+          setSpectate(null);
           done();
         }
         if (!alive) return;
       }
+      // 不管是放完了、被新 envelope 快进、还是「提前结算」，都用真 envelope 对齐——
+      // 和刷新恢复走的是同一个 apply（按 tileId 对账，任意跳几步都对得上）
       tableView!.apply(env, consumed);
+      if (skipRequested) {
+        skipRequested = false;
+        tableView!.finishTweens(); // 跳到终局就不再有牌在飞
+      }
       setWordLog(tableView!.wordLog);
       setMySeatUi(env.state.me.seat);
       if (platesSeat !== env.state.me.seat) {
@@ -848,6 +876,7 @@ export function Table3D({
       cast.setActor(actorOf(env, null));
       setHintsOn(env.state.config.hints);
       setConfig(env.state.config);
+      setWordList(env.state.wordList ?? null);
       hintsOnFlag = env.state.config.hints;
       // 提示：决策换了（摸了新牌、轮到别家）就清掉点过的词、收起列表、取消高亮
       const decision = decisionKeyOf(env);
@@ -955,6 +984,18 @@ export function Table3D({
     );
 
     retryCheckRef.current = () => validator.retry();
+    skipReplayRef.current = () => {
+      if (!replaying) return;
+      skipRequested = true;
+      fastForward = true; // 回放循环在下一次检查时停下（和「回放中又来了 envelope」同一个出口）
+      // 排着队的落地音效、气泡一并撤掉：跳过去之后不该再响、再冒
+      for (const t of soundTimers) window.clearTimeout(t);
+      soundTimers.clear();
+      for (const t of bubbleTimers.values()) window.clearTimeout(t);
+      bubbleTimers.clear();
+      setBubbles({});
+      wakeDwell?.();
+    };
 
     // ---- T6.1 吃牌 ----
     // 结果同样只有一个来源：mainLoop 每帧用输入框的内容对应一次，喂给第二个校验器。
@@ -1350,6 +1391,7 @@ export function Table3D({
       chiValidator.dispose();
       ungroupActRef.current = null;
       retryCheckRef.current = null;
+      skipReplayRef.current = null;
       retryChiRef.current = null;
       wildActRef.current = null;
       validator.dispose();
@@ -1481,8 +1523,25 @@ export function Table3D({
           {b.text}
         </div>
       ))}
+      {/* 观战横幅：血战到底里你胡了、回放还在放、还有人在打。横幅和按钮同进同出——
+          非血战局你一胡本局就结束，回放里那一步也不该冒出「还有 N 家在打」 */}
+      {spectate &&
+        canSkipReplay({
+          bloody: config?.bloody ?? false,
+          meWon: true,
+          replaying: replayingUi,
+          stillPlaying: spectate.left,
+        }) && (
+          <div className="table3d-spectate" role="status">
+            <span>{spectateText(spectate)}</span>
+            <button className="table3d-spectate-skip" onClick={() => skipReplayRef.current?.()}>
+              提前结算 →
+            </button>
+          </div>
+        )}
       <ConfigBar
         config={config}
+        wordList={wordList}
         onPeek={() => {
           setPrefsOpen(false);
           setLogOpen(false);
@@ -1512,6 +1571,12 @@ export function Table3D({
             setPrefsOpen(false);
           }}
         />
+        {/* 这一排是 row-reverse：写在最后＝排在最左边 */}
+        {wordList && (
+          <div className="table3d-listbar" title={`胡牌时亮词和暗词里至少要有 ${wordList.need} 个词单词`}>
+            📋 {wordList.name} · {listProgress(wordList)}
+          </div>
+        )}
       </div>
       <PrefsPanel
         open={prefsOpen}
@@ -1586,6 +1651,7 @@ export function Table3D({
                   <span className="table3d-check-meta">
                     {check.result.score} 分
                     {check.result.inTier && " · 词库内 +10"}
+                    {check.result.inList && " · 词单词"}
                     {(check.result.drawCount ?? 0) > 0 && ` · 亮出可补摸 ${check.result.drawCount} 张`}
                   </span>
                 </>
@@ -1721,6 +1787,7 @@ export function Table3D({
                     <span className="table3d-check-meta">
                       {chiCheck.result.score} 分
                       {chiCheck.result.inTier && " · 词库内 +10"}
+                      {chiCheck.result.inList && " · 词单词"}
                       {(chiCheck.result.drawCount ?? 0) > 0 && ` · 亮出可补摸 ${chiCheck.result.drawCount} 张`}
                     </span>
                   </>

@@ -296,6 +296,66 @@ header b {
   gap: 10px;
   margin-top: 4px;
 }
+
+/* ---------- 我的词单弹窗 ---------- */
+
+/* 两个类名叠加：.sheet 的 max-width 写在后面，单个类名压不过它。
+   弹窗挂在设置卡里面，要把设置卡的居中对齐改回左对齐 */
+.sheet.sheet-wordlists {
+  max-width: 520px;
+  text-align: left;
+}
+.wl-list {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wl-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 12px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  font-size: 15px;
+}
+.wl-name {
+  color: #fff;
+}
+.wl-meta {
+  flex: 1;
+  color: #cfe6da;
+}
+.wl-confirm {
+  display: flex;
+  gap: 12px;
+}
+.wl-danger {
+  color: #ffb4a2;
+}
+.wl-upload-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.wl-result {
+  margin: 0 0 12px;
+  padding: 11px 13px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 7px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: #eaf4ee;
+}
+.wl-warn {
+  color: var(--gold);
+}
+.wl-rejected {
+  padding-left: 14px;
+}
 .btn-save {
   display: block;
   width: 100%;
@@ -969,6 +1029,27 @@ header b {
 .seg-on:hover {
   background: var(--gold);
 }
+/* 设置页「＋ 上传词单」：虚线框，和选项区分开 */
+.seg-add {
+  background: transparent;
+  border-style: dashed;
+  color: #9fc3b0;
+}
+/* 文字链接样式的按钮（「管理我的词单」「删除」） */
+.link-btn {
+  padding: 0;
+  font: inherit;
+  color: var(--gold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 .switch-row {
   display: flex;
@@ -1491,6 +1572,12 @@ header b {
   margin-left: auto;
   font-size: 12px;
   color: #cfe6da;
+}
+/* 「提前结算」在最右边。说明和按钮都是 margin-left:auto，空白两边平分——说明落在中间 */
+.spectating-skip {
+  margin-left: auto;
+  padding: 7px 18px;
+  font-size: 14px;
 }
 .spectating-hand {
   display: flex;
@@ -2573,6 +2660,49 @@ button.footer-link {
   align-items: flex-start;
   gap: 6px;
   z-index: 9;
+}
+/* 观战横幅（「提前结算」）：手牌上方居中，照效果图 spectate-3d.png */
+.table3d-spectate {
+  position: absolute;
+  left: 50%;
+  bottom: 134px;
+  transform: translateX(-50%);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px 8px 18px;
+  border: 1px solid rgba(212, 162, 76, 0.55);
+  border-radius: 12px;
+  background: rgba(15, 25, 20, 0.82);
+  color: #f0e6cf;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.table3d-spectate-skip {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--gold);
+  color: #2a1a05;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.table3d-spectate-skip:hover {
+  filter: brightness(1.08);
+}
+/* 自建词单的进度小条：和同排按钮一样的高度（padding / 字号 / 行高 / 边框都照 .table3d-account），
+   金色细边表示「这是本局的目标」；只显示，不能点 */
+.table3d-listbar {
+  padding: 6px 12px;
+  border: 1px solid rgba(212, 162, 76, 0.7);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #e8f2ec;
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 /* T6.6：右上角的账号入口，和 ⚙ ⓘ 同一排、同一套样式。已登录显示名字（过长截断） */
 .table3d-account {

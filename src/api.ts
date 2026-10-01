@@ -71,6 +71,11 @@ export interface State {
     bloody: boolean;
     difficulty: string;
   };
+  /**
+   * 自建词单的进度，不用词单时为 null。`have` 是亮词 + 已申报暗词里的词单词个数，
+   * 由服务端数好——够不够数前端不判（前端零规则）
+   */
+  wordList: { name: string; need: number; have: number } | null;
 }
 
 export interface Pending {
@@ -113,6 +118,8 @@ export interface Result {
   /** 错题集：这些牌你本来能拼出来，但没看出来 */
   missed: string[];
   leftover: Tile[];
+  /** 本局你拼出的词单词（按拼出顺序）。不用词单时为空 */
+  listWords: string[];
 }
 
 export interface Envelope {
@@ -128,6 +135,8 @@ export interface Validation {
   valid: boolean;
   word?: string;
   inTier?: boolean;
+  /** 这个词是不是本场词单里的词 */
+  inList?: boolean;
   isAbbr?: boolean;
   score?: number;
   drawCount?: number;
@@ -188,6 +197,28 @@ export interface MatchConfig {
   bloody: boolean;
   difficulty: string;
   maxGames: number;
+  /** 自建词单的 id。不用词单时不传 */
+  wordListId?: number;
+  /** 胡牌至少需要几个词单词（1 / 2）。只在带了 wordListId 时有意义 */
+  listNeed?: number;
+}
+
+/** 「我的词单」列表里的一份 */
+export interface WordListSummary {
+  id: number;
+  name: string;
+  wordCount: number;
+  /** 上传时间，Unix 秒 */
+  createdAt: number;
+}
+
+/** 上传词单的结果。拒收的词和提示都由服务端给，前端原样展示 */
+export interface WordListUpload {
+  id: number;
+  name: string;
+  wordCount: number;
+  rejected: { word: string; reason: string }[];
+  warnings: string[];
 }
 
 // ---- 匿名玩家身份 ----
@@ -298,6 +329,21 @@ export const api = {
     ),
 
   nextGame: (id: string) => post<Envelope>(`/api/matches/${id}/games`),
+
+  // ---- 自建词单 ----
+
+  /** 自己的词单，最近上传的在前 */
+  wordLists: () => request<{ lists: WordListSummary[] }>("/api/wordlists").then((r) => r.lists),
+
+  /**
+   * 上传词单。`content` 是文件**原始字节**的 base64——前端不解码，
+   * 编码（UTF-8 / GBK）只在服务端识别一处。整份拒收时抛 ApiError，message 是服务端的原因
+   */
+  uploadWordList: (name: string, filename: string, content: string) =>
+    post<WordListUpload>("/api/wordlists", { name, filename, content }),
+
+  deleteWordList: (id: number) =>
+    request<{ ok: boolean }>(`/api/wordlists/${id}`, { method: "DELETE" }),
 
   /** 做一个决策：打牌 / 亮词 / 吃 / 胡 / 过 */
   act: (

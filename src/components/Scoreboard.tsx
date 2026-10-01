@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { AI_NAMES } from "../aiNames";
 import { api, type MyStanding, type Result, type State } from "../api";
+import { listWordsTitle } from "../wordLists";
 import { Leaderboard } from "./Leaderboard";
 import { Profile } from "./Profile";
 import { Tile } from "./Tile";
@@ -113,6 +114,24 @@ export function Scoreboard({
               )}
             </div>
           </div>
+
+          {/* 本局拼出的词单词：只在用了词单的对局里出现，样式同「拼出的词」 */}
+          {state.wordList && (
+            <div className="profile-box profile-ok">
+              <div className="profile-title">{listWordsTitle(result.listWords.length, state.wordList.name)}</div>
+              <div>
+                {result.listWords.length ? (
+                  result.listWords.map((w, k) => (
+                    <span key={`${w}-${k}`} className="chip">
+                      {w.toUpperCase()}
+                    </span>
+                  ))
+                ) : (
+                  <span className="empty">这局一个词单词都没拼出来</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {result.missed.length > 0 && (
             <div className="profile-box profile-bad">

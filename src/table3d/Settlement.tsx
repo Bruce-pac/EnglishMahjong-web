@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { api, type MyStanding, type Result, type ResultRow, type State } from "../api";
 import { AI_NAMES } from "./names";
+import { exhaustedNote, listWordsTitle } from "./word-list";
 
 /**
  * 名次：按**本局分数**从高到低（用户定）。同分时胡了的排在前面、按胡牌先后（winOrder）；
@@ -91,7 +92,7 @@ export function Settlement({
           {matchFinished ? "全场结束" : `第 ${state.gamesPlayed} 局结束`}
           {result.exhausted && <span className="table3d-settle-tag">荒牌</span>}
         </h2>
-        {result.exhausted && <p className="table3d-settle-note">牌墙摸完了，这一局没人胡</p>}
+        {result.exhausted && <p className="table3d-settle-note">{exhaustedNote(result.rows)}</p>}
 
         <table className="table3d-settle-rows">
           <tbody>
@@ -134,6 +135,23 @@ export function Settlement({
               )}
             </div>
           </div>
+          {/* 本局拼出的词单词：只在用了词单的对局里出现，样式同「拼出的词」 */}
+          {state.wordList && (
+            <div className="box ok">
+              <div className="box-title">{listWordsTitle(result.listWords.length, state.wordList.name)}</div>
+              <div>
+                {result.listWords.length ? (
+                  result.listWords.map((w, k) => (
+                    <span key={`${w}-${k}`} className="table3d-chip">
+                      {w.toUpperCase()}
+                    </span>
+                  ))
+                ) : (
+                  <span className="empty">这局一个词单词都没拼出来</span>
+                )}
+              </div>
+            </div>
+          )}
           {result.missed.length > 0 && (
             <div className="box bad">
               <div className="box-title">❌ 漏掉的词 +{result.missed.length}</div>

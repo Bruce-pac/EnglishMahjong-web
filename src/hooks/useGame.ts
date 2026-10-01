@@ -76,6 +76,8 @@ export function useGame() {
    */
   const [celebrate, setCelebrate] = useState<GameEvent | null>(null);
   const timers = useRef<number[]>([]);
+  /** 正在回放的那个 envelope、要播的事件、已经播了几条。「提前结算」靠它直接落到终局 */
+  const playing = useRef<{ next: Envelope; worth: GameEvent[]; shown: number } | null>(null);
   // discard/win 是 useCallback 包的，闭包会把值锁在创建那一刻。用 ref 兜住最新值。
   const matchIdRef = useRef<string | undefined>(undefined);
   matchIdRef.current = env?.matchId;
@@ -106,6 +108,7 @@ export function useGame() {
     (next: Envelope, instant = false) => {
       timers.current.forEach(clearTimeout);
       timers.current = [];
+      playing.current = null;
 
       // 只有别人的动作值得慢放；自己的操作是即时反馈，不该等
       const worth = next.events.filter((e) => e.seat !== undefined && e.seat !== 0);
@@ -135,10 +138,13 @@ export function useGame() {
       // 动画期间界面上还挂着**旧的** pending，按钮若不锁住，玩家点下去发的就是
       // 过期的操作，服务端只会回 400。所以整段回放期间输入必须是禁用的。
       setReplaying(true);
+      const current = { next, worth, shown: 0 };
+      playing.current = current;
 
       worth.forEach((e, i) => {
         timers.current.push(
           window.setTimeout(() => {
+            current.shown = i + 1;
             setReplay(e);
             pushLog(e);
             const s = SOUND_FOR[e.t];
@@ -148,6 +154,7 @@ export function useGame() {
       });
       timers.current.push(
         window.setTimeout(() => {
+          playing.current = null;
           setReplay(null);
           setReplaying(false);
           setEnv(next);
@@ -157,6 +164,23 @@ export function useGame() {
     },
     [pushLog],
   );
+
+  /**
+   * 提前结算：清掉还没触发的回放定时器（连带排在里面的音效），把没播的事件补进日志，
+   * 直接落到这次请求的最终状态——和看完回放落到的是同一个 envelope，得分、名次都一样
+   */
+  const skipReplay = useCallback(() => {
+    const current = playing.current;
+    if (!current) return;
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    playing.current = null;
+    current.worth.slice(current.shown).forEach(pushLog);
+    setCelebrate(null); // 胡牌特效的收起定时器也被清了，这里手动收
+    setReplay(null);
+    setReplaying(false);
+    setEnv(current.next);
+  }, [pushLog]);
 
   const run = useCallback(
     async (fn: () => Promise<Envelope>, instant = false) => {
@@ -284,6 +308,9 @@ export function useGame() {
     error,
     /** 请求进行中、或正在播 AI 动画——两种情况下都不该接受输入 */
     busy: busy || replaying,
+    /** 正在播 AI 的动画（「提前结算」按钮只在这时出现） */
+    replaying,
+    skipReplay,
     replay,
     log,
     /** 刚有人胡牌 —— 放庆祝特效，别让画面看着像卡死 */
